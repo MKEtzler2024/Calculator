@@ -4,7 +4,13 @@ import re
 import matplotlib.pyplot as plt
 import numpy as np
 from fractions import Fraction
-from sympy import symbols, simplify, solve, Eq, expand, Abs
+from sympy import (
+    symbols, simplify, solve,factor, Eq, expand, Abs, Piecewise, sympify, S,
+    sin, cos, tan, csc, sec, cot, sqrt, pi, Poly, lambdify
+)
+
+
+
 
 # Define symbols 'x' and 'h' for algebraic operations
 x, h = symbols('x h')
@@ -17,17 +23,14 @@ def format_solution(value):
 
 def add_multiplication_sign(expression):
     """Insert explicit multiplication signs where needed, replace '^' with '**'."""
-    # Insert '*' between a number and a letter (variable or function name)
-    expression = re.sub(r"(\d)([a-zA-Z\(])", r"\1*\2", expression)
-    # Insert '*' between a closing parenthesis and an opening parenthesis
-    expression = re.sub(r"(\))(\()", r"\1*\2", expression)
-    # Insert '*' between a variable or function and an opening parenthesis
-    expression = re.sub(r"([a-zA-Z\)])(\()", r"\1*\2", expression)
-    # Insert '*' between a number or variable and an opening parenthesis
-    expression = re.sub(r"([0-9a-zA-Z\.])(\()", r"\1*\2", expression)
     # Replace '^' with '**' for exponentiation
-    expression = expression.replace("^", "**")
+    expression = expression.replace('^', '**')
+    # Insert '*' between a number and a variable (e.g., '2x' -> '2*x')
+    expression = re.sub(r'(\d)([a-zA-Z\(])', r'\1*\2', expression)
+    # Insert '*' between closing and opening parentheses (e.g., ')( -> ')*(')
+    expression = re.sub(r'(\))(\()', r'\1*\2', expression)
     return expression
+
 
 def is_whole_number(value, tol=1e-5):
     """Check if the value is a whole number within a small tolerance."""
@@ -164,6 +167,82 @@ def plot_line(slope, y_intercept, x_intercept):
     plt.legend(loc='upper left')
     plt.grid(True)
     plt.show()
+
+def plot_quadratic(expr, h, k, x_intercepts, discriminant, y_intercept):
+    """Plots the quadratic function and marks the vertex, x-intercepts, and y-intercept."""
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from sympy import lambdify, symbols
+
+    x = symbols('x')
+    x_vals = np.linspace(float(h.evalf()) - 10, float(h.evalf()) + 10, 400)
+    f = lambdify(x, expr, modules=['numpy', 'sympy'])
+    y_vals = f(x_vals)
+
+    plt.figure(figsize=(8, 6))
+    plt.plot(x_vals, y_vals, label='Quadratic Function')
+    plt.plot(float(h.evalf()), float(k.evalf()), 'ro', label='Vertex')  # Mark the vertex
+    plt.axvline(float(h.evalf()), color='green', linestyle='--', label='Axis of Symmetry')
+
+    # Proceed with plotting only if discriminant is non-negative
+    if discriminant >= 0:
+        # Mark x-intercepts if they are real
+        real_roots = [root for root in x_intercepts if root.is_real]
+        for root in real_roots:
+            plt.plot(float(root.evalf()), 0, 'bo', label='X-Intercept')
+
+    # Plot the y-intercept
+    plt.plot(0, float(y_intercept.evalf()), 'go', label='Y-Intercept')
+
+    # Avoid duplicate labels in the legend
+    handles, labels = plt.gca().get_legend_handles_labels()
+    by_label = dict(zip(labels, handles))
+    plt.legend(by_label.values(), by_label.keys())
+
+    plt.title('Graph of the Quadratic Function')
+    plt.xlabel('x')
+    plt.ylabel('f(x)')
+    plt.grid(True)
+    plt.show()
+
+def plot_polynomial(polynomial_expr, solutions):
+    """Plots the polynomial function and marks its roots."""
+    import numpy as np
+    import matplotlib.pyplot as plt
+    from sympy import lambdify, symbols
+
+    x = symbols('x')
+    # Create a numerical function from the symbolic expression
+    f = lambdify(x, polynomial_expr, modules=['numpy'])
+
+    # Generate x values around the roots for better visualization
+    if solutions:
+        real_solutions = [float(sol.evalf()) for sol in solutions if sol.is_real]
+        min_x = min(real_solutions) - 5
+        max_x = max(real_solutions) + 5
+    else:
+        # If no real roots, use a default range
+        min_x = -10
+        max_x = 10
+
+    x_vals = np.linspace(min_x, max_x, 400)
+    y_vals = f(x_vals)
+
+    plt.figure(figsize=(8, 6))
+    plt.plot(x_vals, y_vals, label='Polynomial Function')
+
+    # Mark the roots
+    for sol in solutions:
+        if sol.is_real:
+            plt.plot(float(sol.evalf()), 0, 'ro', label='Root')
+
+    plt.title('Graph of the Polynomial Function')
+    plt.xlabel('x')
+    plt.ylabel('f(x)')
+    plt.grid(True)
+    plt.legend()
+    plt.show()
+
 
 # ------------------- Solver Functions ------------------- #
 def substitution_method(eq1_str, eq2_str):
@@ -818,6 +897,206 @@ def calculate_amplitude_and_period(equation_str):
     except Exception as e:
         raise ValueError(f"Error in calculating amplitude and period: {str(e)}")
 
+def evaluate_piecewise_function_defined(expr1, op1, val1, expr2, op2, val2):
+    """Evaluates and plots the piecewise function when it is defined outside the given intervals."""
+    try:
+        from sympy import symbols, sympify, Piecewise, lambdify
+        x = symbols('x')
+
+        # Convert the input expressions to sympy expressions
+        f_expr1 = sympify(expr1)
+        f_expr2 = sympify(expr2)
+
+        # Convert the condition values to sympy numbers
+        val1 = sympify(val1)
+        val2 = sympify(val2)
+
+        # Create conditions using sympy relational operators
+        cond1 = eval(f"x {op1} {val1}")
+        cond2 = eval(f"x {op2} {val2}")
+
+        # Define the piecewise function
+        f_piecewise = Piecewise(
+            (f_expr1, cond1),
+            (f_expr2, cond2),
+            (0, True)  # Else, defined as 0
+        )
+
+        # Prepare for plotting
+        f_lambdified = lambdify(x, f_piecewise, modules=['numpy'])
+        x_vals = np.linspace(float(val1) - 10, float(val2) + 10, 400)
+        y_vals = f_lambdified(x_vals)
+
+        # Plotting
+        plt.figure(figsize=(8, 6))
+        plt.plot(x_vals, y_vals, label='Piecewise Function')
+        plt.title('Graph of the Piecewise Function')
+        plt.xlabel('x')
+        plt.ylabel('f(x)')
+        plt.grid(True)
+        plt.legend()
+        plt.show()
+
+        return "The piecewise function has been graphed."
+    except Exception as e:
+        raise ValueError(f"Error in evaluating piecewise function: {str(e)}")
+
+def evaluate_piecewise_function_undefined(expr1, expr2, expr3, x_val):
+    """Evaluates the piecewise function at a given x value when undefined outside intervals."""
+    try:
+        from sympy import symbols, sympify, Piecewise, S
+        x = symbols('x')
+
+        # Convert the input expressions to sympy expressions
+        f_expr1 = sympify(expr1)
+        f_expr2 = sympify(expr2)
+        f_expr3 = sympify(expr3)
+
+        # Define conditions
+        cond1 = x < 0
+        cond2 = Eq(x, 0)
+        cond3 = x > 0
+
+        # Define the piecewise function
+        f_piecewise = Piecewise(
+            (f_expr1, cond1),
+            (f_expr2, cond2),
+            (f_expr3, cond3),
+            (S.NaN, True)  # Else undefined
+        )
+
+        # Evaluate the function at x_val
+        result = f_piecewise.subs(x, x_val).evalf()
+
+        return result
+    except Exception as e:
+        raise ValueError(f"Error in evaluating piecewise function: {str(e)}")
+
+def solve_equation(lhs_str, rhs_str):
+    """Solves the equation lhs = rhs for x, including equations with square roots."""
+    try:
+        from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
+        # Prepare transformations and local dictionary
+        transformations = standard_transformations + (implicit_multiplication_application,)
+        local_dict = {'x': x, 'sqrt': sqrt, 'sin': sin, 'cos': cos, 'tan': tan, 'csc': csc, 'sec': sec, 'cot': cot, 'pi': pi}
+        # Convert the input strings to sympy expressions
+        lhs_expr = parse_expr(add_multiplication_sign(lhs_str), local_dict=local_dict, transformations=transformations)
+        rhs_expr = parse_expr(add_multiplication_sign(rhs_str), local_dict=local_dict, transformations=transformations)
+        # Solve the equation lhs = rhs
+        solutions = solve(Eq(lhs_expr, rhs_expr), x)
+        # Filter out extraneous solutions if necessary
+        valid_solutions = []
+        for sol in solutions:
+            # Check if the solution satisfies the original equation
+            if lhs_expr.subs(x, sol).equals(rhs_expr.subs(x, sol)):
+                valid_solutions.append(sol)
+        if not valid_solutions:
+            return "No solution"
+        else:
+            return valid_solutions
+    except Exception as e:
+        raise ValueError(f"Error solving equation: {str(e)}")
+
+def solve_quadratics(equation_str):
+    """Solves a quadratic equation to find the vertex, axis of symmetry, concavity, x-intercepts, y-intercept, and plots the graph."""
+    try:
+        from sympy.parsing.sympy_parser import (
+            parse_expr, standard_transformations, implicit_multiplication_application
+        )
+        from sympy import Symbol, simplify, Poly, lambdify, S
+        import numpy as np
+        import matplotlib.pyplot as plt
+
+        # Prepare transformations and local dictionary
+        transformations = standard_transformations + (implicit_multiplication_application,)
+        x = Symbol('x')
+        local_dict = {'x': x, 'sqrt': sqrt}
+
+        # Remove any spaces and replace '^' with '**' for exponentiation
+        equation_str = equation_str.replace(' ', '').replace('^', '**')
+
+        # Check if the equation contains '='
+        if '=' in equation_str:
+            lhs_str, rhs_str = equation_str.split('=')
+            rhs_expr = parse_expr(add_multiplication_sign(rhs_str), local_dict=local_dict, transformations=transformations)
+        else:
+            # If there's no '=', treat the entire string as the expression
+            rhs_expr = parse_expr(add_multiplication_sign(equation_str), local_dict=local_dict, transformations=transformations)
+
+        # Convert the expression to a quadratic polynomial
+        quadratic_expr = simplify(rhs_expr)
+
+        # Check if the expression is quadratic
+        poly = Poly(quadratic_expr, x)
+        if poly.degree() != 2:
+            raise ValueError("The provided equation is not quadratic.")
+
+        # Get coefficients a, b, c
+        coeffs = poly.all_coeffs()
+        # Ensure that coeffs has length 3 by padding with zeros if necessary
+        coeffs = [0]*(3 - len(coeffs)) + coeffs
+        a, b, c = coeffs
+
+        # Compute the vertex (h, k)
+        h = -b / (2 * a)
+        k = quadratic_expr.subs(x, h)
+
+        # Determine the axis of symmetry
+        axis_of_symmetry = h
+
+        # Determine concavity
+        concavity = "upwards (concave up)" if a > 0 else "downwards (concave down)"
+
+        # Calculate the discriminant
+        discriminant = b**2 - 4*a*c
+
+        # Calculate x-intercepts (roots)
+        if discriminant >= 0:
+            x_intercepts = solve(quadratic_expr, x)
+        else:
+            x_intercepts = []
+
+        # Compute the y-intercept by evaluating the quadratic expression at x = 0
+        y_intercept = quadratic_expr.subs(x, 0)
+        y_intercept_float = float(y_intercept.evalf())
+
+        # Plot the graph, pass discriminant and y_intercept
+        plot_quadratic(quadratic_expr, h, k, x_intercepts, discriminant, y_intercept)
+
+        # Format x-intercepts for display
+        if x_intercepts:
+            x_intercepts_display = [float(root.evalf()) for root in x_intercepts]
+        else:
+            x_intercepts_display = ["No real roots"]
+
+        # Return the results
+        return {
+            'vertex': (float(h.evalf()), float(k.evalf())),
+            'axis_of_symmetry': float(axis_of_symmetry.evalf()),
+            'concavity': concavity,
+            'x_intercepts': x_intercepts_display,
+            'y_intercept': y_intercept_float
+        }
+
+    except Exception as e:
+        raise ValueError(f"Error in solving quadratic equation: {str(e)}")
+
+def solve_polynomial(polynomial_str):
+    """Solves f(x) = 0, factors the polynomial, and plots it."""
+    try:
+        x = symbols('x')
+        # Convert the input string to a sympy expression
+        polynomial_expr = sympify(add_multiplication_sign(polynomial_str))
+        # Factor the polynomial
+        factored_form = factor(polynomial_expr)
+        # Solve f(x) = 0
+        solutions = solve(polynomial_expr, x)
+        # Plot the polynomial
+        plot_polynomial(polynomial_expr, solutions)
+        return factored_form, solutions
+    except Exception as e:
+        raise ValueError(f"Error in solving polynomial: {str(e)}")
+
 
 # ------------------- Function Operations ------------------- #
 def apply_function_operations(f_expr, g_expr):
@@ -1088,6 +1367,19 @@ def on_submit():
                         "Slope of the Line Result",
                         f"Slope: {slope}"
                     )
+            if input_type == "Polynomials":
+                try:
+                    polynomial_str = polynomial_entry.get()
+                    if not polynomial_str:
+                        raise ValueError("Please enter a polynomial function.")
+                    factored_form, solutions = solve_polynomial(polynomial_str)
+                    solutions_str = ', '.join(str(sol) for sol in solutions)
+                    messagebox.showinfo(
+                        "Polynomial Result",
+                        f"Factored Form: {factored_form}\nSolutions (roots): {solutions_str}\nThe polynomial has been graphed."
+                    )
+                except Exception as e:
+                    messagebox.showerror("Error", str(e))
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
@@ -1342,11 +1634,81 @@ def on_submit():
             messagebox.showinfo("Amplitude and Period Result", result_str)
         except Exception as e:
             messagebox.showerror("Error", str(e))
-        else:
-            messagebox.showerror(
-                "Error",
-                "Please select a math problem type."
+    if problem_type == "Piecewise Functions":
+        try:
+            is_defined = piecewise_defined_var.get()
+            if is_defined == "Undefined":
+                expr1 = piecewise_expr1_entry.get()
+                expr2 = piecewise_expr2_entry.get()
+                expr3 = piecewise_expr3_entry.get()
+                x_value = piecewise_x_entry.get()
+
+                if not (expr1 and expr2 and expr3 and x_value):
+                    raise ValueError("Please enter all the required fields.")
+
+                # Convert x_value to float
+                x_val = float(x_value)
+
+                # Evaluate the piecewise function
+                result = evaluate_piecewise_function_undefined(expr1, expr2, expr3, x_val)
+
+                messagebox.showinfo("Piecewise Function Result", f"f({x_val}) = {result}")
+            else:
+                expr1 = piecewise_cond_expr1_entry.get()
+                op1 = piecewise_op1_var.get()
+                val1 = piecewise_val1_entry.get()
+                expr2 = piecewise_cond_expr2_entry.get()
+                op2 = piecewise_op2_var.get()
+                val2 = piecewise_val2_entry.get()
+
+                if not (expr1 and op1 and val1 and expr2 and op2 and val2):
+                    raise ValueError("Please enter all the required fields.")
+
+                # Evaluate and plot the piecewise function
+                result = evaluate_piecewise_function_defined(expr1, op1, val1, expr2, op2, val2)
+
+                messagebox.showinfo("Piecewise Function Result", result)
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+    elif problem_type == "Solution Set of Equations":
+        try:
+            lhs = equation_lhs_entry.get()
+            rhs = equation_rhs_entry.get()
+            solutions = solve_equation(lhs, rhs)
+            messagebox.showinfo("Equation Solution", f"Solution(s): {solutions}")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+    elif problem_type == "Solve Quadratics":
+        try:
+            equation_str = quadratic_equation_entry.get()
+            if not equation_str:
+                raise ValueError("Please enter a quadratic equation.")
+            results = solve_quadratics(equation_str)
+            vertex = results['vertex']
+            axis_of_symmetry = results['axis_of_symmetry']
+            concavity = results['concavity']
+            x_intercepts = results['x_intercepts']
+            y_intercept = results['y_intercept']
+
+            # Format x-intercepts for display
+            x_intercepts_str = ', '.join(str(xi) for xi in x_intercepts)
+
+            result_str = (
+                f"Vertex: ({vertex[0]}, {vertex[1]})\n"
+                f"Axis of Symmetry: x = {axis_of_symmetry}\n"
+                f"Concavity: Opens {concavity}\n"
+                f"X-Intercept(s): {x_intercepts_str}\n"
+                f"Y-Intercept: {y_intercept}\n"
+                "The quadratic function has been graphed."
             )
+            messagebox.showinfo("Quadratic Function Result", result_str)
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+    else:
+        messagebox.showerror(
+            "Error",
+            "Please select a math problem type."
+        )
 
 def switch_input_type(*args):
     """Switches between different input frames based on the selected input type."""
@@ -1354,6 +1716,7 @@ def switch_input_type(*args):
     equation_frame.pack_forget()
     points_frame.pack_forget()
     parallel_perpendicular_frame.pack_forget()
+    polynomial_frame.pack_forget()  # Hide the polynomial frame initially
 
     # Show the relevant frame based on the selected input type
     choice = var.get()
@@ -1363,6 +1726,8 @@ def switch_input_type(*args):
         points_frame.pack(pady=10)
     elif choice == "Parallel/Perpendicular":
         parallel_perpendicular_frame.pack(pady=10)
+    elif choice == "Polynomials":
+        polynomial_frame.pack(pady=10)
 
 def switch_problem_type(*args):
     """Switches the visible input frames based on the selected problem type."""
@@ -1386,6 +1751,9 @@ def switch_problem_type(*args):
     trig_ratios_frame.pack_forget()
     trig_one_func_frame.pack_forget()
     amplitude_period_frame.pack_forget()
+    piecewise_frame.pack_forget()
+    solution_equation_frame.pack_forget()
+    quadratic_frame.pack_forget()
 
     # Show the relevant frame based on the selected problem type
     problem_type = problem_var.get()
@@ -1423,6 +1791,13 @@ def switch_problem_type(*args):
         trig_one_func_frame.pack(pady=10)
     elif problem_type == "Amplitude and Period":
         amplitude_period_frame.pack(pady=10)
+    elif problem_type == "Piecewise Functions":
+        piecewise_frame.pack(pady=10)
+        switch_piecewise_mode()  # Ensure correct fields are shown
+    elif problem_type == "Solution Set of Equations":
+        solution_equation_frame.pack(pady=10)
+    elif problem_type == "Solve Quadratics":
+        quadratic_frame.pack(pady=10)
     else:
         messagebox.showerror("Error", "Invalid problem type selected.")
 
@@ -1438,6 +1813,59 @@ def switch_absolute_value_input(*args):
     domain_range_frame.pack_forget()
     fg_frame.pack_forget()
     dq_frame.pack_forget()
+
+def switch_piecewise_mode(*args):
+    """Switches the input fields based on whether the function is defined or undefined outside intervals."""
+    if piecewise_defined_var.get() == "Undefined":
+        # Show the entries for three expressions and x value
+        expr1_label.pack()
+        piecewise_expr1_entry.pack()
+        expr2_label.pack()
+        piecewise_expr2_entry.pack()
+        expr3_label.pack()
+        piecewise_expr3_entry.pack()
+        x_value_label.pack()
+        piecewise_x_entry.pack()
+
+        # Hide the conditional expressions and operators
+        cond_expr1_label.pack_forget()
+        piecewise_cond_expr1_entry.pack_forget()
+        op1_label.pack_forget()
+        piecewise_op1_menu.pack_forget()
+        val1_label.pack_forget()
+        piecewise_val1_entry.pack_forget()
+
+        cond_expr2_label.pack_forget()
+        piecewise_cond_expr2_entry.pack_forget()
+        op2_label.pack_forget()
+        piecewise_op2_menu.pack_forget()
+        val2_label.pack_forget()
+        piecewise_val2_entry.pack_forget()
+    else:
+        # Show the entries for conditional expressions
+        cond_expr1_label.pack()
+        piecewise_cond_expr1_entry.pack()
+        op1_label.pack()
+        piecewise_op1_menu.pack()
+        val1_label.pack()
+        piecewise_val1_entry.pack()
+
+        cond_expr2_label.pack()
+        piecewise_cond_expr2_entry.pack()
+        op2_label.pack()
+        piecewise_op2_menu.pack()
+        val2_label.pack()
+        piecewise_val2_entry.pack()
+
+        # Hide the entries for three expressions and x value
+        expr1_label.pack_forget()
+        piecewise_expr1_entry.pack_forget()
+        expr2_label.pack_forget()
+        piecewise_expr2_entry.pack_forget()
+        expr3_label.pack_forget()
+        piecewise_expr3_entry.pack_forget()
+        x_value_label.pack_forget()
+        piecewise_x_entry.pack_forget()
 
 # ------------------- GUI Setup ------------------- #
 # Creating the main window
@@ -1464,21 +1892,90 @@ problem_type_menu = tk.OptionMenu(window, problem_var,
                                   "Quadrants",
                                   "Trig 6",
                                   "Trig Ratios (x,y)",
-                                  "Trig Functions from One Function",  # Added new problem type
+                                  "Trig Functions from One Function",
                                   "Amplitude and Period",
+                                  "Piecewise Functions",
+                                  "Solution Set of Equations",
+                                  "Solve Quadratics",
                                   command=switch_problem_type)
 problem_type_menu.pack(pady=10)
 
 
 
+# Frame for Quadratic Equation input
+quadratic_frame = tk.Frame(window)
+tk.Label(quadratic_frame, text="Enter the quadratic expression (e.g., -(x-2)^2+9):").pack()
+quadratic_equation_entry = tk.Entry(quadratic_frame, width=40)
+quadratic_equation_entry.pack()
 
 
+
+# Frame for Solution Set of Equations input
+solution_equation_frame = tk.Frame(window)
+tk.Label(solution_equation_frame, text="Enter the left-hand side of the equation (e.g., x^2 + 2x - 35):").pack()
+equation_lhs_entry = tk.Entry(solution_equation_frame, width=40)
+equation_lhs_entry.pack()
+tk.Label(solution_equation_frame, text="Enter the right-hand side of the equation (e.g., 0):").pack()
+equation_rhs_entry = tk.Entry(solution_equation_frame, width=40)
+equation_rhs_entry.pack()
+
+# Frame for Piecewise Functions input
+piecewise_frame = tk.Frame(window)
+
+# Ask if the function is defined or undefined outside the given intervals
+tk.Label(piecewise_frame, text="Is the function defined outside the given intervals?").pack()
+piecewise_defined_var = tk.StringVar(value="Undefined")
+tk.Radiobutton(piecewise_frame, text="Defined", variable=piecewise_defined_var, value="Defined", command=switch_piecewise_mode).pack()
+tk.Radiobutton(piecewise_frame, text="Undefined", variable=piecewise_defined_var, value="Undefined", command=switch_piecewise_mode).pack()
+
+# For Undefined case (three expressions and x value)
+expr1_label = tk.Label(piecewise_frame, text="Enter the expression for f(x) when x < 0:")
+piecewise_expr1_entry = tk.Entry(piecewise_frame, width=30)
+
+expr2_label = tk.Label(piecewise_frame, text="Enter the expression for f(x) when x = 0:")
+piecewise_expr2_entry = tk.Entry(piecewise_frame, width=30)
+
+expr3_label = tk.Label(piecewise_frame, text="Enter the expression for f(x) when x > 0:")
+piecewise_expr3_entry = tk.Entry(piecewise_frame, width=30)
+
+x_value_label = tk.Label(piecewise_frame, text="Enter the x value to evaluate (e.g., -1):")
+piecewise_x_entry = tk.Entry(piecewise_frame, width=30)
+
+# For Defined case (conditional expressions)
+cond_expr1_label = tk.Label(piecewise_frame, text="Enter the expression for the first piece:")
+piecewise_cond_expr1_entry = tk.Entry(piecewise_frame, width=30)
+
+op1_label = tk.Label(piecewise_frame, text="Select the operator for the first piece:")
+piecewise_op1_var = tk.StringVar(value="<=")
+piecewise_op1_menu = tk.OptionMenu(piecewise_frame, piecewise_op1_var, "<", "<=", ">", ">=", "==")
+
+val1_label = tk.Label(piecewise_frame, text="Enter the value for the first piece condition (e.g., -1):")
+piecewise_val1_entry = tk.Entry(piecewise_frame, width=10)
+
+cond_expr2_label = tk.Label(piecewise_frame, text="Enter the expression for the second piece:")
+piecewise_cond_expr2_entry = tk.Entry(piecewise_frame, width=30)
+
+op2_label = tk.Label(piecewise_frame, text="Select the operator for the second piece:")
+piecewise_op2_var = tk.StringVar(value=">")
+piecewise_op2_menu = tk.OptionMenu(piecewise_frame, piecewise_op2_var, "<", "<=", ">", ">=", "==")
+
+val2_label = tk.Label(piecewise_frame, text="Enter the value for the second piece condition (e.g., -1):")
+piecewise_val2_entry = tk.Entry(piecewise_frame, width=10)
+
+# Initially set the correct fields based on default value
+switch_piecewise_mode()
 
 # Dropdown for choosing input type (only for "Slope of a Line")
 var = tk.StringVar(window)
 var.set("Equation")
 
-input_type_menu = tk.OptionMenu(window, var, "Equation", "Points", "Parallel/Perpendicular", command=switch_input_type)
+input_type_menu = tk.OptionMenu(window, var, "Equation", "Points", "Parallel/Perpendicular", "Polynomials", command=switch_input_type)
+
+# Create the polynomial input frame
+polynomial_frame = tk.Frame(window)
+tk.Label(polynomial_frame, text="Enter a polynomial function (e.g., x^3 - 4x^2 - 7x + 10):").pack()
+polynomial_entry = tk.Entry(polynomial_frame, width=40)
+polynomial_entry.pack()
 
 # Frame for Quadrants input
 quadrants_frame = tk.Frame(window)
@@ -1501,7 +1998,6 @@ trig_one_value_entry.pack()
 tk.Label(trig_one_func_frame, text="Enter the quadrant number (1-4):").pack()
 trig_one_quadrant_entry = tk.Entry(trig_one_func_frame, width=10)
 trig_one_quadrant_entry.pack()
-
 
 # Create a new frame for the Trig Functions from One Function input
 trig_one_func_frame = tk.Frame(window)
