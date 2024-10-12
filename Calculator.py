@@ -4,10 +4,14 @@ import re
 import matplotlib.pyplot as plt
 import numpy as np
 from fractions import Fraction
+import sympy
 from sympy import (
-    symbols, simplify, solve,factor, Eq, expand, Abs, Piecewise, sympify, S,
-    sin, cos, tan, csc, sec, cot, sqrt, pi, Poly, lambdify
+    symbols, simplify, solve, factor, Eq, expand, Abs, Piecewise, sympify,solveset, S,
+    sin, cos, tan, csc, sec, cot, sqrt, pi, Poly, lambdify, Mod
 )
+from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
+from sympy.sets import Interval
+
 
 
 
@@ -31,10 +35,17 @@ def add_multiplication_sign(expression):
     expression = re.sub(r'(\))(\()', r'\1*\2', expression)
     return expression
 
-
 def is_whole_number(value, tol=1e-5):
     """Check if the value is a whole number within a small tolerance."""
     return np.isclose(value, round(value), atol=tol)
+
+def safe_fraction_or_float(value):
+    """Attempts to convert a value to a Fraction, or fall back to float if necessary."""
+    try:
+        return Fraction(value)
+    except ValueError:
+        # If it's not a valid fraction, try converting it to a float
+        return float(value)
 
 # ------------------- Coefficient Extraction Functions ------------------- #
 def extract_coefficients(equation):
@@ -740,12 +751,14 @@ def calculate_remaining_trig_functions(known_func_name, known_value_str, quadran
     return results
 
 def calculate_amplitude_and_period(equation_str):
-    """Calculates amplitude, period, and key points of a trigonometric function and plots it."""
+    """Calculates period, phase shift, vertical shift, and key points of a trigonometric function and plots it."""
     try:
-        from sympy import symbols, S, pi, simplify, Abs, sin, cos, tan, cot, sec, csc
+        from sympy import symbols, pi, sin, cos, tan, cot, sec, csc, Abs, S, expand, lambdify
         import numpy as np
         import matplotlib.pyplot as plt
-        from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
+        from sympy.parsing.sympy_parser import (
+            parse_expr, standard_transformations, implicit_multiplication_application
+        )
 
         # Remove spaces and replace '^' with '**' for exponentiation
         equation_str = equation_str.replace(" ", "").replace("^", "**")
@@ -757,143 +770,219 @@ def calculate_amplitude_and_period(equation_str):
         if lhs != 'y':
             raise ValueError("Equation must be in the form y = ...")
 
-        # Define the variable x
-        x = symbols('x')
+        # Define the variable x and ensure it's real
+        x = symbols('x', real=True)
 
-        # Parse RHS expression using sympy with implicit multiplication
+        # Parse RHS expression using sympy with implicit multiplication and disable evaluation
         transformations = standard_transformations + (implicit_multiplication_application,)
-        local_dict = {'x': x, 'sin': sin, 'cos': cos, 'tan': tan, 'cot': cot, 'sec': sec, 'csc': csc}
-        rhs_expr = parse_expr(rhs, local_dict=local_dict, transformations=transformations)
+        local_dict = {
+            'x': x, 'pi': pi, 'sin': sin, 'cos': cos, 'tan': tan,
+            'cot': cot, 'sec': sec, 'csc': csc
+        }
 
-        # Initialize vertical_shift to 0
-        vertical_shift = S(0)
+        # Parse the RHS without automatic simplification
+        rhs_expr = parse_expr(rhs, local_dict=local_dict, transformations=transformations, evaluate=False)
 
-        # Separate vertical shift
+        # Check for vertical shift
         if rhs_expr.is_Add:
-            terms = rhs_expr.args
+            terms = rhs_expr.as_ordered_terms()
             trig_term = None
-            vertical_shift = S(0)
+            vertical_shift = S.Zero
             for term in terms:
-                if term.has(x):
-                    if term.has(sin, cos, tan, cot, sec, csc):
-                        trig_term = term
-                    else:
-                        vertical_shift += term
+                if any(term.has(func) for func in [sin, cos, tan, cot, sec, csc]):
+                    trig_term = term
                 else:
                     vertical_shift += term
-            if trig_term is None:
-                raise ValueError("No trigonometric function found in the equation.")
         else:
             trig_term = rhs_expr
+            vertical_shift = S.Zero
 
-        # Extract amplitude and trig function
+        # Extract amplitude or leading coefficient (skipped for tan)
+        amplitude = S.One
         if trig_term.is_Mul:
             factors = trig_term.args
-            amplitude = S(1)
-            trig_function = None
             for factor in factors:
-                if factor.has(sin, cos, tan, cot, sec, csc):
-                    trig_function = factor
+                if any(factor.has(func) for func in [sin, cos, tan, cot, sec, csc]):
+                    trig_function_term = factor
                 else:
                     amplitude *= factor
-            if trig_function is None:
-                raise ValueError("No trigonometric function found in the equation.")
-        elif trig_term.func in [sin, cos, tan, cot, sec, csc]:
-            amplitude = S(1)
-            trig_function = trig_term
         else:
-            raise ValueError("Unsupported trigonometric function.")
+            trig_function_term = trig_term
 
-        # Identify the trig function
-        trig_func_str = trig_function.func.__name__
+        amplitude_value = Abs(amplitude)
 
-        # Now, the argument is the argument of the trig function
-        argument = trig_function.args[0]
+        # Identify the trigonometric function
+        trig_function = trig_function_term.func
 
-        # Extract frequency (B) and phase shift (C) from argument
-        B = argument.coeff(x)
-        C = argument.subs(x, 0)
+        # Extract argument of the trigonometric function (it will be of the form B*x + D)
+        argument = trig_function_term.args[0]
+        argument = expand(argument)
 
-        if B == 0:
-            raise ValueError("Frequency cannot be zero.")
+        # Extract B (coefficient of x) and D (constant term)
+        B = argument.coeff(x)  # Coefficient of x is the frequency B
+        D = argument - B * x  # Constant term is D
+        phase_shift_value = -D / B  # Phase shift C = -D/B
 
-        # Calculate period
-        if trig_func_str in ['sin', 'cos', 'sec', 'csc']:
+        # Calculate the period
+        if trig_function in [sin, cos, sec, csc]:
             base_period = 2 * pi
-        elif trig_func_str in ['tan', 'cot']:
+        elif trig_function in [tan, cot]:
             base_period = pi
         else:
             raise ValueError("Unsupported trigonometric function.")
 
-        period = simplify(base_period / Abs(B))
+        period = base_period / Abs(B)
 
-        # Calculate phase shift
-        phase_shift = simplify(-C / B)
+        # Determine phase shift direction
+        phase_shift_num = float(phase_shift_value.evalf())
+        if phase_shift_num > 0:
+            phase_shift_direction = f"right by {Abs(phase_shift_value)}"
+        elif phase_shift_num < 0:
+            phase_shift_direction = f"left by {Abs(phase_shift_value)}"
+        else:
+            phase_shift_direction = "no horizontal shift"
 
-        # Create a dictionary for trigonometric functions
-        trig_functions = {'sin': sin, 'cos': cos, 'tan': tan, 'cot': cot, 'sec': sec, 'csc': csc}
+        # Determine vertical shift direction
+        vertical_shift_value = float(vertical_shift.evalf())
+        if vertical_shift_value > 0:
+            vertical_shift_direction = f"up by {vertical_shift}"
+        elif vertical_shift_value < 0:
+            vertical_shift_direction = f"down by {Abs(vertical_shift)}"
+        else:
+            vertical_shift_direction = "no vertical shift"
 
-        # Calculate key points
+        # Initialize key points list
         key_points = []
-        increments = period / 4
-        for i in range(5):
-            x_key = phase_shift + increments * i
-            x_value = simplify(x_key)
-            angle = B * x_key + C
-            # Evaluate the trigonometric function at the angle
-            trig_value = trig_functions[trig_func_str](angle)
-            y_value_sympy = amplitude * trig_value + vertical_shift
-            y_value = y_value_sympy.evalf()
-            key_points.append((x_value, y_value_sympy))
+
+        if trig_function == tan:
+            # Handle tangent function key points
+            left_asymptote_x = -pi / (2 * B) - D / B
+            right_asymptote_x = pi / (2 * B) - D / B
+
+            center_x = 0
+            center_value = vertical_shift  # tan(0) = 0
+
+            left_mid_x = left_asymptote_x / 2
+            right_mid_x = right_asymptote_x / 2
+
+            left_mid_value = amplitude * tan(B * left_mid_x + D) + vertical_shift
+            right_mid_value = amplitude * tan(B * right_mid_x + D) + vertical_shift
+
+            key_points = [
+                (left_asymptote_x, S.NaN),    # Left asymptote
+                (left_mid_x, left_mid_value),  # Left midpoint
+                (center_x, center_value),      # Center point
+                (right_mid_x, right_mid_value),  # Right midpoint
+                (right_asymptote_x, S.NaN)     # Right asymptote
+            ]
+        elif trig_function in [sin, cos]:
+            # Handle sine and cosine function key points
+            # One period key points
+            h = phase_shift_value
+            # Critical points within one period
+            key_points = [
+                (h - period/4, vertical_shift),
+                (h, amplitude + vertical_shift),
+                (h + period/4, vertical_shift),
+                (h + period/2, -amplitude + vertical_shift),
+                (h + 3*period/4, vertical_shift),
+                (h + period, amplitude + vertical_shift)
+            ]
+        # You can add more conditions for other trig functions if needed
+
+        # Define custom numpy functions
+        import numpy as np
+
+        def numpy_cot(x):
+            return 1 / np.tan(x)
+
+        def numpy_sec(x):
+            return 1 / np.cos(x)
+
+        def numpy_csc(x):
+            return 1 / np.sin(x)
+
+        # Create a dictionary for lambdify
+        numpy_funcs = {
+            'sin': np.sin,
+            'cos': np.cos,
+            'tan': np.tan,
+            'cot': numpy_cot,
+            'sec': numpy_sec,
+            'csc': numpy_csc,
+            'pi': np.pi,
+        }
+
+        # Create a numerical function using lambdify
+        f = lambdify(x, rhs_expr, modules=[numpy_funcs])
+
+        # Generate x-values for plotting
+        if trig_function == tan:
+            x_min = float(left_asymptote_x - period)
+            x_max = float(right_asymptote_x + period)
+        else:
+            x_min = float(phase_shift_value - 2 * period)
+            x_max = float(phase_shift_value + 2 * period)
+        x_values = np.linspace(x_min, x_max, 1000)
+
+        # Evaluate the function numerically
+        y_values = f(x_values)
+
+        # Handle complex numbers in y_values
+        y_real = np.real(y_values)
+        y_imag = np.imag(y_values)
+        imag_threshold = 1e-6
+        mask = np.abs(y_imag) > imag_threshold
+        y_real[mask] = np.nan
+        y_values = y_real
+
+        # Handle asymptotes by setting large values to NaN
+        y_values[np.abs(y_values) > 10 * abs(float(amplitude_value)) + abs(float(vertical_shift_value))] = np.nan
 
         # Plot the function
-        B_float = float(B.evalf())
-        C_float = float(C.evalf())
-        D_float = float(vertical_shift.evalf())
-        amplitude_float = float(amplitude.evalf())
-        period_float = float(period.evalf())
-        phase_shift_float = float(phase_shift.evalf())
-
-        x_vals = np.linspace(phase_shift_float - period_float, phase_shift_float + 2 * period_float, 1000)
-
-        if trig_func_str == 'sin':
-            y_vals = amplitude_float * np.sin(B_float * x_vals + C_float) + D_float
-        elif trig_func_str == 'cos':
-            y_vals = amplitude_float * np.cos(B_float * x_vals + C_float) + D_float
-        elif trig_func_str == 'tan':
-            y_vals = amplitude_float * np.tan(B_float * x_vals + C_float) + D_float
-            y_vals[np.abs(y_vals) > 10 * abs(amplitude_float)] = np.nan
-        elif trig_func_str == 'cot':
-            y_vals = amplitude_float / np.tan(B_float * x_vals + C_float) + D_float
-            y_vals[np.abs(y_vals) > 10 * abs(amplitude_float)] = np.nan
-        elif trig_func_str == 'sec':
-            y_vals = amplitude_float / np.cos(B_float * x_vals + C_float) + D_float
-            y_vals[np.abs(y_vals) > 10 * abs(amplitude_float)] = np.nan
-        elif trig_func_str == 'csc':
-            y_vals = amplitude_float / np.sin(B_float * x_vals + C_float) + D_float
-            y_vals[np.abs(y_vals) > 10 * abs(amplitude_float)] = np.nan
-        else:
-            raise ValueError("Unsupported trigonometric function.")
-
         plt.figure(figsize=(8, 4))
-        plt.plot(x_vals, y_vals, label=equation_str)
+        plt.plot(x_values, y_values, label=equation_str)
         plt.title(f"Graph of {equation_str}")
         plt.xlabel('x')
         plt.ylabel('y')
         plt.grid(True)
-        plt.ylim(-10 * abs(amplitude_float) + D_float, 10 * abs(amplitude_float) + D_float)
-        # Mark key points
-        x_key_vals = [float(kp[0].evalf()) for kp in key_points]
-        y_key_vals = [float(kp[1].evalf()) if kp[1] != 'undefined' else np.nan for kp in key_points]
-        plt.plot(x_key_vals, y_key_vals, 'ro')  # Plot key points
-        for x_kp, y_kp in zip(x_key_vals, y_key_vals):
-            plt.annotate(f"({round(x_kp, 2)}, {round(y_kp, 2)})", xy=(x_kp, y_kp),
-                         textcoords="offset points", xytext=(0, 10), ha='center')
+
+        # Set y-limits based on amplitude and vertical shift
+        if trig_function in [sin, cos]:
+            y_min = -1.5 * float(amplitude_value) + float(vertical_shift_value)
+            y_max = 1.5 * float(amplitude_value) + float(vertical_shift_value)
+        elif trig_function == tan:
+            y_min = -10 * float(amplitude_value) + float(vertical_shift_value)
+            y_max = 10 * float(amplitude_value) + float(vertical_shift_value)
+        else:
+            y_min = -10
+            y_max = 10
+        plt.ylim(y_min, y_max)
+
+        # Plot key points and asymptotes
+        for x_kp, y_kp in key_points:
+            x_val = float(x_kp.evalf()) if hasattr(x_kp, 'evalf') else float(x_kp)
+            y_kp_eval = y_kp.evalf() if hasattr(y_kp, 'evalf') else y_kp
+            if isinstance(y_kp_eval, sympy.Expr) and y_kp_eval.is_real:
+                y_val = float(y_kp_eval)
+            elif y_kp_eval == S.NaN:
+                y_val = np.nan
+            else:
+                y_val = np.nan
+            if np.isnan(y_val):
+                plt.axvline(x=x_val, color='gray', linestyle='--')  # Plot asymptotes
+            else:
+                plt.plot(x_val, y_val, 'ro')
+                plt.annotate(f"({x_val:.2f}, {y_val:.2f})", xy=(x_val, y_val),
+                             textcoords="offset points", xytext=(0, 10), ha='center')
+
         plt.legend()
         plt.show()
 
-        # Return amplitude, period, and key points
-        return amplitude, period, key_points
+        # Return the amplitude (or None for tangent), period, phase shift with direction, vertical shift, and key points
+        phase_shift_description = f"{phase_shift_direction}, {vertical_shift_direction}"
+        return amplitude_value if trig_function != tan else None, period, phase_shift_description, key_points
+
     except Exception as e:
         raise ValueError(f"Error in calculating amplitude and period: {str(e)}")
 
@@ -1097,6 +1186,414 @@ def solve_polynomial(polynomial_str):
     except Exception as e:
         raise ValueError(f"Error in solving polynomial: {str(e)}")
 
+def neg_arc_function(function_name, mode, value_str):
+    """
+    Computes the inverse trigonometric function value.
+
+    Parameters:
+    - function_name: 'sin', 'cos', 'tan', 'csc', 'sec', 'cot'
+    - mode: '-1' or 'arc'
+    - value_str: The value as a string (e.g., '1', 'sqrt(3)/2')
+
+    Returns:
+    - A tuple (angle_rad, angle_deg) where:
+      - angle_rad: The angle in radians (simplified if possible), or numeric value
+      - angle_deg: The angle in degrees (evaluated numerically)
+    - Returns 'No solution' if the input is outside the domain.
+    """
+    try:
+        from sympy import S, pi, asin, acos, atan, acsc, asec, acot, sqrt, N
+        value = S(value_str)
+        # Map function names to inverse trigonometric functions
+        inverse_functions = {
+            'sin': asin,
+            'cos': acos,
+            'tan': atan,
+            'csc': acsc,
+            'sec': asec,
+            'cot': acot
+        }
+        if function_name not in inverse_functions:
+            raise ValueError("Invalid function name.")
+        inverse_func = inverse_functions[function_name]
+        # Compute the inverse trigonometric function
+        angle_rad = inverse_func(value)
+        if angle_rad.has('I'):
+            # The result is complex, so input is outside the domain
+            return "No solution"
+        # Try to simplify the radian value
+        angle_rad_simplified = angle_rad.rewrite(pi).simplify()
+        # Check if angle_rad_simplified contains inverse trig functions
+        if angle_rad_simplified.has(asin, acos, atan, acsc, asec, acot):
+            # Cannot simplify further, evaluate numerically
+            angle_rad_final = angle_rad.evalf(5)  # Evaluate to 5 decimal places
+        else:
+            angle_rad_final = angle_rad_simplified
+        # Convert angle to degrees
+        angle_deg = angle_rad.evalf(5) * 180 / pi
+        angle_deg = angle_deg.evalf(5)
+        return angle_rad_final, angle_deg
+    except Exception as e:
+        return "No solution"
+
+def right_triangle(given_values):
+    """
+    Given any two of the sides (a, b, c) or angles (A, B), computes the remaining sides and angles.
+
+    Parameters:
+    - given_values: dictionary with two keys and their values, e.g., {'a': 3, 'b': 4}
+
+    Returns:
+    - Dictionary with all sides and angles
+    """
+    import math
+
+    # Initialize variables
+    a = b = c = A = B = None
+
+    # Extract given values
+    for key, value in given_values.items():
+        if key == 'a':
+            a = float(value)
+        elif key == 'b':
+            b = float(value)
+        elif key == 'c':
+            c = float(value)
+        elif key == 'A':
+            A = float(value)
+        elif key == 'B':
+            B = float(value)
+        else:
+            raise ValueError("Invalid key in given_values")
+
+    # Since C = 90 degrees
+    C = 90.0
+
+    # Compute missing angles if one is given
+    if A is not None and B is None:
+        B = 90.0 - A
+    elif B is not None and A is None:
+        A = 90.0 - B
+    elif A is not None and B is not None:
+        # Validate that A + B = 90 degrees
+        if abs(A + B - 90.0) > 1e-6:
+            raise ValueError("Angles A and B must add up to 90 degrees in a right triangle")
+
+    # Compute sides and angles based on given information
+    if a is not None and b is not None:
+        # Given sides a and b
+        c = math.hypot(a, b)
+        A = math.degrees(math.atan2(a, b))
+        B = 90.0 - A
+    elif a is not None and c is not None:
+        # Given sides a and c
+        if c <= a:
+            raise ValueError("Hypotenuse c must be greater than side a")
+        b = math.sqrt(c**2 - a**2)
+        A = math.degrees(math.asin(a / c))
+        B = 90.0 - A
+    elif b is not None and c is not None:
+        # Given sides b and c
+        if c <= b:
+            raise ValueError("Hypotenuse c must be greater than side b")
+        a = math.sqrt(c**2 - b**2)
+        B = math.degrees(math.asin(b / c))
+        A = 90.0 - B
+    elif a is not None and A is not None:
+        # Given side a and angle A
+        c = a / math.sin(math.radians(A))
+        b = math.sqrt(c**2 - a**2)
+        B = 90.0 - A
+    elif b is not None and B is not None:
+        # Given side b and angle B
+        c = b / math.sin(math.radians(B))
+        a = math.sqrt(c**2 - b**2)
+        A = 90.0 - B
+    elif a is not None and B is not None:
+        # Given side a and angle B
+        c = a / math.cos(math.radians(B))
+        b = math.sqrt(c**2 - a**2)
+        A = 90.0 - B
+    elif b is not None and A is not None:
+        # Given side b and angle A
+        c = b / math.cos(math.radians(A))
+        a = math.sqrt(c**2 - b**2)
+        B = 90.0 - A
+    elif c is not None and A is not None:
+        # Given hypotenuse c and angle A
+        a = c * math.sin(math.radians(A))
+        b = c * math.cos(math.radians(A))
+        B = 90.0 - A
+    elif c is not None and B is not None:
+        # Given hypotenuse c and angle B
+        b = c * math.sin(math.radians(B))
+        a = c * math.cos(math.radians(B))
+        A = 90.0 - B
+    else:
+        raise ValueError("Insufficient or invalid data to solve the triangle")
+
+    # Build result dictionary
+    result = {
+        'a': a,
+        'b': b,
+        'c': c,
+        'A': A,
+        'B': B,
+        'C': C
+    }
+    return result
+
+def solve_trig_intervals(equation_str, interval_unit):
+    """
+    Solves trigonometric equations with one or more trigonometric functions within a specified interval.
+
+    Parameters:
+    - equation_str: str, the trigonometric equation as a string (e.g., "2*sin(x) + 3*cos(x) = 1")
+    - interval_unit: str, the unit of the interval ("Radians", "Degrees", "Degrees (0 to 180)")
+
+    Returns:
+    - dict containing:
+        - 'transformed_eq': str, the standardized form of the equation after rearrangement
+        - 'solutions': list of str, solutions within the specified interval, formatted with units
+    """
+    import sympy
+    from sympy import symbols, Eq, pi, sin, cos, tan, csc, sec, cot, solveset, Interval, Function, nsimplify, simplify
+    from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
+    import re
+
+    # Define the variable
+    x = symbols('x', real=True)
+
+    # Replace '^' with '**' for exponentiation
+    equation_str = equation_str.replace('^', '**')
+
+    # Handle trigonometric functions with degrees, e.g., sin(48.5') -> sin(48.5 * pi / 180)
+    equation_str = re.sub(r'(sin|cos|tan|csc|sec|cot)\(\s*([0-9.]+)\'\s*\)', r'\1(\2 * pi / 180)', equation_str)
+
+    # Split the equation into LHS and RHS
+    if '=' not in equation_str:
+        raise ValueError("Equation must contain '='.")
+
+    parts = equation_str.split('=')
+    if len(parts) != 2:
+        raise ValueError("Equation must contain exactly one '=' sign.")
+    lhs_str, rhs_str = parts
+
+    # Define parsing transformations
+    transformations = standard_transformations + (implicit_multiplication_application,)
+
+    # Define local dictionary for parsing
+    local_dict = {
+        'x': x,
+        'pi': pi,
+        'sin': sin,
+        'cos': cos,
+        'tan': tan,
+        'csc': csc,
+        'sec': sec,
+        'cot': cot,
+        'sqrt': sympy.sqrt,
+    }
+
+    try:
+        # Parse LHS and RHS expressions
+        lhs_expr = parse_expr(lhs_str, local_dict=local_dict, transformations=transformations)
+        rhs_expr = parse_expr(rhs_str, local_dict=local_dict, transformations=transformations)
+    except Exception as e:
+        raise ValueError(f"Error parsing the equation: {e}")
+
+    # Create the equation
+    eq = Eq(lhs_expr, rhs_expr)
+
+    # Convert the equation to standard form (lhs - rhs = 0)
+    eq_standard = Eq(lhs_expr - rhs_expr, 0)
+
+    # Handle degrees or radians
+    if interval_unit == 'Degrees':
+        x_deg = symbols('x_deg', real=True)
+        eq_standard = eq_standard.subs(x, x_deg * pi / 180)
+        x_new = x_deg
+        domain = Interval(0, 360, False, True)
+        unit = "degrees"
+    elif interval_unit == 'Degrees (0 to 180)':
+        x_deg = symbols('x_deg', real=True)
+        eq_standard = eq_standard.subs(x, x_deg * pi / 180)
+        x_new = x_deg
+        domain = Interval(0, 180, False, True)
+        unit = "degrees"
+    elif interval_unit == 'Radians':
+        # No substitution needed
+        x_new = x
+        domain = Interval(0, 2 * pi, False, True)
+        unit = "radians"
+    else:
+        raise ValueError("Invalid interval unit. Choose 'Radians', 'Degrees', or 'Degrees (0 to 180)'.")
+
+    # Solve the equation within the domain
+    solutions = solveset(eq_standard, x_new, domain=domain)
+
+    # Convert solutions to a list
+    if solutions.is_FiniteSet:
+        solutions_list = list(solutions)
+    else:
+        # Handle ImageSet or other types if necessary
+        solutions_list = []
+
+    # Remove duplicates without using set()
+    unique_solutions = []
+    for sol in solutions_list:
+        if not any(sol.equals(s) for s in unique_solutions):
+            unique_solutions.append(sol)
+    solutions_list = unique_solutions
+
+    # Sort the solutions
+    try:
+        solutions_list.sort(key=lambda s: float(s.evalf()))
+    except:
+        pass  # In case solutions can't be converted to float for sorting
+
+    # Format solutions with appropriate units and precision
+    final_solutions = []
+    for sol in solutions_list:
+        if unit == "degrees":
+            sol_eval = sol.evalf()
+            # Round to two decimal places
+            sol_rounded = round(float(sol_eval), 2)
+            final_solutions.append(f"{sol_rounded} degrees")
+        else:
+            # Express in terms of pi for radians
+            try:
+                sol_simplified = nsimplify(sol / pi, tolerance=1e-10) * pi
+                final_solutions.append(f"{sol_simplified} radians")
+            except:
+                # Fallback to numerical value if simplification fails
+                sol_num = sol.evalf(5)
+                final_solutions.append(f"{sol_num} radians")
+
+    return {
+        'transformed_eq': str(eq_standard),
+        'solutions': final_solutions
+    }
+
+def find_sinusoidal_equation(y_intercept, trough_y, trough_x, first_wave_x):
+    """
+    Finds the equation of a sine wave given the y-intercept, trough, and first wave end point.
+    Returns the equation of the form y = A * sin(Bx + C) + D, supporting fractional input.
+    """
+    from sympy import symbols, sin, solve, pi, Eq
+
+    # Define the variable
+    x = symbols('x')
+
+    # Convert inputs to fractions for precision
+    y_intercept = Fraction(y_intercept)
+    trough_y = Fraction(trough_y)
+    trough_x = Fraction(trough_x)
+    first_wave_x = Fraction(first_wave_x)
+
+    # Amplitude A
+    A = abs(trough_y - y_intercept) / 2  # Amplitude is half the distance between trough and y-intercept
+
+    # Vertical shift D (midline)
+    D = (trough_y + y_intercept) / 2
+
+    # Period and frequency B
+    period = 2 * (first_wave_x - trough_x)  # The period is double the distance from trough to first wave peak
+    B = 2 * pi / period  # B is calculated using 2π / period
+
+    # Phase shift C (based on the location of the trough)
+    C = solve(Eq(A * sin(B * trough_x + symbols('C')), trough_y - D), symbols('C'))[0]
+
+    # Construct the sinusoidal equation
+    equation = A * sin(B * x + C) + D
+
+    return equation.simplify()
+
+def divide_polynomials(equation_str, divisor_str):
+    """
+    Divides a polynomial by a divisor. Performs synthetic division if the divisor is linear.
+    Otherwise, performs polynomial long division and returns the quotient plus remainder/divisor.
+
+    Parameters:
+    - equation_str: str, the dividend polynomial (e.g., "10x^4 + 4x^3 - 9x^2 + 3/2x^2 -1")
+    - divisor_str: str, the divisor polynomial (e.g., "x - 3" or "2x^2 -1")
+
+    Returns:
+    - If synthetic division is performed:
+        - tuple: (quotient, remainder)
+    - If polynomial long division is performed:
+        - sympy expression: quotient + (remainder / divisor)
+    """
+    try:
+        # Preprocess inputs: Replace '^' with '**' and remove spaces
+        equation_str = equation_str.replace('^', '**').replace(' ', '')
+        divisor_str = divisor_str.replace('^', '**').replace(' ', '')
+
+        # Insert '*' where necessary
+        equation_str = add_multiplication_sign(equation_str)
+        divisor_str = add_multiplication_sign(divisor_str)
+
+        # Parse the polynomial and divisor expressions using sympy
+        transformations = standard_transformations + (implicit_multiplication_application,)
+        poly_expr = parse_expr(equation_str, transformations=transformations)
+        divisor_expr = parse_expr(divisor_str, transformations=transformations)
+
+        # Convert to Poly objects with respect to x
+        poly = Poly(poly_expr, x)
+        divisor = Poly(divisor_expr, x)
+
+        # Determine the degree of the divisor
+        divisor_degree = divisor.degree()
+
+        if divisor_degree == 1:
+            # Synthetic Division
+
+            # Extract coefficients (from highest degree to constant term)
+            coefficients = poly.all_coeffs()
+
+            # Parse the divisor to extract c from "x - c" or "x + c"
+            match = re.match(r"x([+-])([\d./]+)", divisor_str)
+            if not match:
+                raise ValueError("For synthetic division, the divisor must be in the form 'x - c' or 'x + c'.")
+
+            sign, num_str = match.groups()
+            c = float(num_str) if sign == '-' else -float(num_str)
+
+            # Perform synthetic division
+            synthetic = [coefficients[0]]  # Initialize with the leading coefficient
+            for coeff in coefficients[1:]:
+                synthetic.append(coeff + synthetic[-1] * c)
+
+            remainder = synthetic.pop()  # Last element is the remainder
+            quotient_coeffs = synthetic  # Remaining elements are the quotient coefficients
+
+            # Create the quotient polynomial
+            quotient = Poly(quotient_coeffs, x).as_expr()
+
+            return quotient, remainder
+
+        else:
+            # Polynomial Long Division
+
+            # Perform polynomial long division
+            quotient, remainder = poly.div(divisor)
+
+            # Convert quotient and remainder to expressions
+            quotient_expr = quotient.as_expr()
+            remainder_expr = remainder.as_expr()
+
+            if remainder.is_zero:
+                # Exact division; return only the quotient
+                return simplify(quotient_expr)
+            else:
+                # Non-exact division; return quotient + (remainder/divisor)
+                # Ensure the remainder and divisor are simplified
+                remainder_over_divisor = simplify(remainder_expr / divisor_expr)
+                full_expression = simplify(quotient_expr + remainder_over_divisor)
+                return full_expression
+
+    except Exception as e:
+        raise ValueError(f"Error in dividing polynomials: {str(e)}")
 
 # ------------------- Function Operations ------------------- #
 def apply_function_operations(f_expr, g_expr):
@@ -1266,8 +1763,22 @@ def show_result(choice, **kwargs):
                 "\n(Simplify your answer, including any radicals. Use integers or fractions for any numbers in the expression.)"
             )
             messagebox.showinfo("Trig Functions Result", result_str)
+        elif choice == "Synthetic Division":
+            polynomial = kwargs.get('polynomial')
+            divisor = kwargs.get('divisor')
+            if not polynomial or not divisor:
+                raise ValueError("Please enter both the polynomial and the divisor.")
+
+            # Perform synthetic division
+            quotient, remainder = synthetic_division(polynomial, divisor)
+
+            # Display the result
+            messagebox.showinfo(
+                "Synthetic Division Result",
+                f"Quotient: {quotient}\nRemainder: {remainder}"
+            )
         else:
-            messagebox.showerror("Error", "Invalid choice.")
+            pass
     except Exception as e:
         messagebox.showerror("Error", str(e))
 
@@ -1623,11 +2134,12 @@ def on_submit():
             equation_str = amplitude_period_entry.get()
             if not equation_str:
                 raise ValueError("Please enter a trigonometric function.")
-            # Capture all three returned values
-            amplitude, period, key_points = calculate_amplitude_and_period(equation_str)
+            # Capture all four returned values: amplitude, period, phase shift, and key points
+            amplitude, period, phase_shift, key_points = calculate_amplitude_and_period(equation_str)
             result_str = (
                 f"Amplitude: {amplitude}\n"
                 f"Period: {period}\n"
+                f"Phase Shift: {phase_shift} radians\n"
                 f"Key Points: {key_points}\n"
                 "The function has been graphed."
             )
@@ -1704,6 +2216,126 @@ def on_submit():
             messagebox.showinfo("Quadratic Function Result", result_str)
         except Exception as e:
             messagebox.showerror("Error", str(e))
+    elif problem_type == "NegArc":
+        try:
+            function_name = neg_arc_func_var.get()
+            mode = neg_arc_mode_var.get()
+            value_str = neg_arc_value_entry.get()
+            if not function_name or not mode or not value_str:
+                raise ValueError("Please enter all required fields.")
+            result = neg_arc_function(function_name, mode, value_str)
+            if result == "No solution":
+                messagebox.showinfo("NegArc Result", "No solution")
+            else:
+                angle_rad, angle_deg = result
+                message = f"The angle in radians: {angle_rad}\nThe angle in degrees: {angle_deg}"
+                messagebox.showinfo("NegArc Result", message)
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+    elif problem_type == "Right Triangle":
+        try:
+            # Collect known values
+            selected_vars = {var_name: var.get() for var_name, var in known_vars.items()}
+            num_selected = sum(selected_vars.values())
+
+            if num_selected != 2:
+                raise ValueError("Please select exactly two known values.")
+
+            given_values = {}
+            for var_name, is_selected in selected_vars.items():
+                if is_selected:
+                    value_str = entries[var_name].get()
+                    if not value_str:
+                        raise ValueError(f"Please enter a value for {var_name}.")
+                    given_values[var_name] = float(value_str)
+
+            # Call the right_triangle function
+            result = right_triangle(given_values)
+
+            # Format the result for display
+            result_str = (
+                f"a = {result['a']}\n"
+                f"b = {result['b']}\n"
+                f"c = {result['c']}\n"
+                f"A = {result['A']} degrees\n"
+                f"B = {result['B']} degrees\n"
+                f"C = {result['C']} degrees\n"
+            )
+            messagebox.showinfo("Right Triangle Result", result_str)
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+    elif problem_type == "Solve Trig Equations in Intervals":
+        try:
+            equation_str = trig_intervals_equation_entry.get()
+            interval_unit = trig_intervals_unit_var.get()
+
+            if not equation_str or not interval_unit:
+                raise ValueError("Please enter both the equation and select the interval unit.")
+
+            # Solve the equation
+            result = solve_trig_intervals(equation_str, interval_unit)
+
+            # Use the correct keys from the result dictionary
+            transformed_eq = result['transformed_eq']
+            solutions = result['solutions']
+
+            if not solutions:
+                messagebox.showinfo(
+                    "Trig Intervals Result",
+                    f"Transformed Equation:\n{transformed_eq}\n\nNo solutions found in the specified interval."
+                )
+            else:
+                # Join solutions into a single string with line breaks
+                solutions_str = '\n'.join(solutions)
+                messagebox.showinfo(
+                    "Trig Intervals Result",
+                    f"Transformed Equation:\n{transformed_eq}\n\nSolutions:\n{solutions_str}"
+                )
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    elif problem_type == "Sinusoidal Function":
+        try:
+            # Get the input values from the GUI as fractions or floats
+            y_intercept = safe_fraction_or_float(sinusoidal_y_intercept_entry.get())
+            trough_y = safe_fraction_or_float(sinusoidal_trough_y_entry.get())
+            trough_x = safe_fraction_or_float(sinusoidal_trough_x_entry.get())
+            first_wave_x = safe_fraction_or_float(sinusoidal_first_wave_x_entry.get())
+
+            # Call the function to calculate the sinusoidal equation
+            equation = find_sinusoidal_equation(y_intercept, trough_y, trough_x, first_wave_x)
+
+            # Display the result in a message box
+            messagebox.showinfo("Sinusoidal Function Result", f"The sinusoidal equation is: y = {equation}")
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+    elif problem_type == "Synthetic Division":
+        try:
+            polynomial = synthetic_poly_entry.get()
+            divisor = synthetic_divisor_entry.get()
+            if not polynomial or not divisor:
+                raise ValueError("Please enter both the polynomial and the divisor.")
+
+            # Perform polynomial division
+            division_result = divide_polynomials(polynomial, divisor)
+
+            # Check if the result is a tuple (synthetic division) or a single expression (long division)
+            if isinstance(division_result, tuple):
+                quotient, remainder = division_result
+                messagebox.showinfo(
+                    "Polynomial Division Result",
+                    f"Quotient: {quotient}\nRemainder: {remainder}"
+                )
+            else:
+                # Polynomial long division
+                full_expression = division_result
+                messagebox.showinfo(
+                    "Polynomial Division Result",
+                    f"Result: {full_expression}"
+                )
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
     else:
         messagebox.showerror(
             "Error",
@@ -1754,6 +2386,11 @@ def switch_problem_type(*args):
     piecewise_frame.pack_forget()
     solution_equation_frame.pack_forget()
     quadratic_frame.pack_forget()
+    neg_arc_frame.pack_forget()
+    right_triangle_frame.pack_forget()
+    trig_intervals_frame.pack_forget()
+    sinusoidal_frame.pack_forget()
+    synthetic_division_frame.pack_forget()
 
     # Show the relevant frame based on the selected problem type
     problem_type = problem_var.get()
@@ -1798,6 +2435,16 @@ def switch_problem_type(*args):
         solution_equation_frame.pack(pady=10)
     elif problem_type == "Solve Quadratics":
         quadratic_frame.pack(pady=10)
+    elif problem_type == "NegArc":
+        neg_arc_frame.pack(pady=10)
+    elif problem_type == "Right Triangle":
+        right_triangle_frame.pack(pady=10)
+    elif problem_type == "Solve Trig Equations in Intervals":
+        trig_intervals_frame.pack(pady=10)
+    elif problem_type == "Sinusoidal Function":
+        sinusoidal_frame.pack(pady=10)
+    elif problem_type == "Synthetic Division":
+        synthetic_division_frame.pack(pady=10)
     else:
         messagebox.showerror("Error", "Invalid problem type selected.")
 
@@ -1897,9 +2544,106 @@ problem_type_menu = tk.OptionMenu(window, problem_var,
                                   "Piecewise Functions",
                                   "Solution Set of Equations",
                                   "Solve Quadratics",
+                                  "NegArc",
+                                  "Right Triangle",
+                                  "Solve Trig Equations in Intervals",
+                                  "Sinusoidal Function",
+                                  "Synthetic Division",
                                   command=switch_problem_type)
 problem_type_menu.pack(pady=10)
 
+# ------------------- Synthetic Division Frame ------------------- #
+synthetic_division_frame = tk.Frame(window)
+
+tk.Label(synthetic_division_frame, text="Enter the polynomial (e.g., 2x^3 - 6x^2 + 2x -1):").pack(pady=5)
+synthetic_poly_entry = tk.Entry(synthetic_division_frame, width=50)
+synthetic_poly_entry.pack(pady=5)
+
+tk.Label(synthetic_division_frame, text="Enter the divisor (e.g., x - 3):").pack(pady=5)
+synthetic_divisor_entry = tk.Entry(synthetic_division_frame, width=30)
+synthetic_divisor_entry.pack(pady=5)
+
+# Frame for Sinusoidal Function input
+sinusoidal_frame = tk.Frame(window)
+
+tk.Label(sinusoidal_frame, text="Enter the y-intercept at x = 0:").pack()
+sinusoidal_y_intercept_entry = tk.Entry(sinusoidal_frame, width=30)
+sinusoidal_y_intercept_entry.pack()
+
+tk.Label(sinusoidal_frame, text="Enter the y-value at the trough:").pack()
+sinusoidal_trough_y_entry = tk.Entry(sinusoidal_frame, width=30)
+sinusoidal_trough_y_entry.pack()
+
+tk.Label(sinusoidal_frame, text="Enter the x-value at the trough:").pack()
+sinusoidal_trough_x_entry = tk.Entry(sinusoidal_frame, width=30)
+sinusoidal_trough_x_entry.pack()
+
+tk.Label(sinusoidal_frame, text="Enter the x-value at the end of the first wave:").pack()
+sinusoidal_first_wave_x_entry = tk.Entry(sinusoidal_frame, width=30)
+sinusoidal_first_wave_x_entry.pack()
+
+
+# Frame for Trig Intervals input
+trig_intervals_frame = tk.Frame(window)
+
+tk.Label(trig_intervals_frame, text="Enter the trigonometric equation (e.g., 2*sin(x) - sqrt(2) = 0):").pack()
+trig_intervals_equation_entry = tk.Entry(trig_intervals_frame, width=50)
+trig_intervals_equation_entry.pack()
+
+tk.Label(trig_intervals_frame, text="Select the interval unit:").pack()
+# Updated code
+trig_intervals_unit_var = tk.StringVar(window)
+trig_intervals_unit_var.set("Radians")  # Default to Radians
+trig_intervals_unit_menu = tk.OptionMenu(
+    trig_intervals_frame, trig_intervals_unit_var, "Radians", "Degrees", "Degrees (0 to 180)"
+)
+trig_intervals_unit_menu.pack()
+
+
+
+# Frame for Right Triangle input
+right_triangle_frame = tk.Frame(window)
+
+# Instructions
+tk.Label(right_triangle_frame, text="Select any two known values and enter their values.").pack()
+
+# Variables for checkboxes
+known_vars = {'a': tk.IntVar(), 'b': tk.IntVar(), 'c': tk.IntVar(),
+              'A': tk.IntVar(), 'B': tk.IntVar()}
+
+# Create checkboxes and entries
+entries = {}
+
+for var_name in ['a', 'b', 'c', 'A', 'B']:
+    frame = tk.Frame(right_triangle_frame)
+    var_check = tk.Checkbutton(frame, text=f"{var_name}", variable=known_vars[var_name])
+    var_check.pack(side="left")
+    entry = tk.Entry(frame, width=10)
+    entries[var_name] = entry
+    entry.pack(side="left")
+    frame.pack(anchor="w")
+
+tk.Label(right_triangle_frame, text="(Note: Angle C is always 90 degrees)").pack()
+
+
+# Frame for NegArc input
+neg_arc_frame = tk.Frame(window)
+
+tk.Label(neg_arc_frame, text="Select the trigonometric function:").pack()
+neg_arc_func_var = tk.StringVar(window)
+neg_arc_func_var.set("sin")  # Default to 'sin'
+neg_arc_func_menu = tk.OptionMenu(neg_arc_frame, neg_arc_func_var, "sin", "cos", "tan", "csc", "sec", "cot")
+neg_arc_func_menu.pack()
+
+tk.Label(neg_arc_frame, text="Select the mode:").pack()
+neg_arc_mode_var = tk.StringVar(window)
+neg_arc_mode_var.set("-1")  # Default to '-1'
+neg_arc_mode_menu = tk.OptionMenu(neg_arc_frame, neg_arc_mode_var, "-1", "arc")
+neg_arc_mode_menu.pack()
+
+tk.Label(neg_arc_frame, text="Enter the value (e.g., 1, sqrt(3)/2):").pack()
+neg_arc_value_entry = tk.Entry(neg_arc_frame, width=30)
+neg_arc_value_entry.pack()
 
 
 # Frame for Quadratic Equation input
@@ -1907,8 +2651,6 @@ quadratic_frame = tk.Frame(window)
 tk.Label(quadratic_frame, text="Enter the quadratic expression (e.g., -(x-2)^2+9):").pack()
 quadratic_equation_entry = tk.Entry(quadratic_frame, width=40)
 quadratic_equation_entry.pack()
-
-
 
 # Frame for Solution Set of Equations input
 solution_equation_frame = tk.Frame(window)
