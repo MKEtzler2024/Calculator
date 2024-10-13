@@ -1,29 +1,38 @@
 import tkinter as tk
 from tkinter import messagebox
 import re
+import math
 import matplotlib.pyplot as plt
 import numpy as np
 from fractions import Fraction
-import sympy
+import sympy as sp
 from sympy import (
     symbols, simplify, solve, factor, Eq, expand, Abs, Piecewise, sympify,solveset, S,
-    sin, cos, tan, csc, sec, cot, sqrt, pi, Poly, lambdify, Mod
+    sin, cos, tan, csc, sec, cot, sqrt, pi, Poly, lambdify, Mod, divisors,solve_univariate_inequality,diff,limit, gcd,
 )
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
 from sympy.sets import Interval
+import traceback
+from sympy.core.sympify import SympifyError
+import logging
 
-
-
-
+# Configure logging
+logging.basicConfig(filename='calculator_errors.log', level=logging.ERROR)
 
 # Define symbols 'x' and 'h' for algebraic operations
-x, h = symbols('x h')
+x = symbols('x')
 
 # ------------------- Utility Functions ------------------- #
 def format_solution(value):
-    """Returns a fraction if the number is not a whole number."""
-    frac = Fraction(value).limit_denominator()
-    return frac if frac.denominator != 1 else int(frac)
+    """Returns a string representing the number with up to 4 decimal places."""
+    try:
+        # If value is a SymPy object, convert it to float
+        if isinstance(value, sympy.Basic):
+            value = float(value.evalf())
+        # Return as string with up to 4 decimal places
+        return f"{value:.4f}"
+    except Exception as e:
+        raise ValueError(f"Error in format_solution: {str(e)}")
 
 def add_multiplication_sign(expression):
     """Insert explicit multiplication signs where needed, replace '^' with '**'."""
@@ -34,6 +43,34 @@ def add_multiplication_sign(expression):
     # Insert '*' between closing and opening parentheses (e.g., ')( -> ')*(')
     expression = re.sub(r'(\))(\()', r'\1*\2', expression)
     return expression
+
+def validate_expression(expr_str):
+    """
+    Validates and formats the expression string for SymPy.
+    """
+    try:
+        formatted_expr = add_multiplication_sign(expr_str.replace('^', '**').replace(' ', ''))
+        sympy_expr = sympify(formatted_expr)
+        return sympy_expr
+    except Exception as e:
+        raise ValueError(f"Invalid expression '{expr_str}': {str(e)}")
+
+def validate_operator(op):
+    """
+    Validates the inequality operator.
+    """
+    if op not in [">", "<", ">=", "<="]:
+        raise ValueError(f"Invalid operator '{op}'. Choose from '>', '<', '>=', '<='.")
+    return op
+
+def validate_numeric(value):
+    """
+    Validates that the input value is numeric.
+    """
+    try:
+        return float(value)
+    except ValueError:
+        raise ValueError(f"Invalid numeric value '{value}'. Please enter a valid number.")
 
 def is_whole_number(value, tol=1e-5):
     """Check if the value is a whole number within a small tolerance."""
@@ -46,6 +83,54 @@ def safe_fraction_or_float(value):
     except ValueError:
         # If it's not a valid fraction, try converting it to a float
         return float(value)
+
+def format_interval(interval):
+    """
+    Formats a SymPy Interval object into a string with appropriate brackets.
+
+    Parameters:
+    - interval: sympy.Interval
+
+    Returns:
+    - str: Formatted interval string
+    """
+    # Determine left bracket
+    if interval.left_open:
+        left_bracket = '('
+    else:
+        left_bracket = '['
+
+    # Determine right bracket
+    if interval.right_open:
+        right_bracket = ')'
+    else:
+        right_bracket = ']'
+
+    # Format left bound
+    if interval.start == -sympy.oo:
+        left_bound = '-∞'
+    else:
+        left_bound = str(interval.start)
+
+    # Format right bound
+    if interval.end == sympy.oo:
+        right_bound = '∞'
+    else:
+        right_bound = str(interval.end)
+
+    return f"{left_bracket}{left_bound}, {right_bound}{right_bracket}"
+
+def is_parentheses_balanced(expr):
+    stack = []
+    for char in expr:
+        if char == '(':
+            stack.append(char)
+        elif char == ')':
+            if not stack:
+                return False
+            stack.pop()
+    return len(stack) == 0
+
 
 # ------------------- Coefficient Extraction Functions ------------------- #
 def extract_coefficients(equation):
@@ -157,6 +242,205 @@ def calculate_slope_for_parallel_perpendicular(equation, x, y, relationship):
     plot_line(slope, y_intercept, x_intercept)
     return slope, y_intercept
 
+def analyze_quadratic(poly_expr):
+    """
+    Given a quadratic expression, compute domain, range, intervals of increase/decrease,
+    concavity, axis of symmetry, vertex, and y-intercept.
+    """
+    # Domain: all real numbers
+    domain = "All real numbers"
+
+    # Ensure the expression is a SymPy expression
+    if not isinstance(poly_expr, sympy.Expr):
+        raise ValueError("poly_expr must be a SymPy expression.")
+
+    # Create a polynomial object
+    poly = Poly(poly_expr, x)
+    coeffs = poly.all_coeffs()
+
+    if len(coeffs) != 3:
+        raise ValueError("The polynomial is not quadratic.")
+
+    a, b, c = coeffs
+
+    # Determine concavity
+    if a > 0:
+        concavity = "Upward"
+    elif a < 0:
+        concavity = "Downward"
+    else:
+        raise ValueError("Coefficient 'a' cannot be zero for a quadratic function.")
+
+    # Axis of symmetry
+    h = -b / (2 * a)
+    axis_of_symmetry = f"x = {format_solution(h)}"
+
+    # Vertex
+    k = a*h**2 + b*h + c
+    vertex = (format_solution(h), format_solution(k))
+
+    # Y-intercept
+    y_intercept = format_solution(c)
+
+    # Range
+    if concavity == "Upward":
+        range_ = f"[{format_solution(k)}, ∞)"
+    else:
+        range_ = f"(-∞, {format_solution(k)}]"
+
+    # Find critical points for increasing/decreasing intervals
+    derivative = diff(poly_expr, x)
+    critical_points = solve(derivative, x)
+
+    # For quadratic, only one critical point, which is the vertex
+    if len(critical_points) == 1:
+        critical_point = critical_points[0]
+        try:
+            h_val = float(critical_point.evalf())
+        except Exception as e:
+            raise ValueError(f"Cannot convert critical point to float: {e}")
+
+        if concavity == "Upward":
+            increasing_interval = f"({h_val}, ∞)"
+            decreasing_interval = f"(-∞, {h_val})"
+        else:
+            increasing_interval = f"(-∞, {h_val})"
+            decreasing_interval = f"({h_val}, ∞)"
+    else:
+        increasing_interval = "Undefined"
+        decreasing_interval = "Undefined"
+
+    # Find x-intercepts
+    discriminant = b**2 - 4*a*c
+    if discriminant > 0:
+        x1 = (-b + sympy.sqrt(discriminant)) / (2*a)
+        x2 = (-b - sympy.sqrt(discriminant)) / (2*a)
+        try:
+            x_intercepts = [format_solution(x1), format_solution(x2)]
+        except Exception as e:
+            raise ValueError(f"Error formatting x-intercepts: {e}")
+    elif discriminant == 0:
+        x_root = -b / (2*a)
+        try:
+            x_intercepts = [format_solution(x_root)]
+        except Exception as e:
+            raise ValueError(f"Error formatting x-intercept: {e}")
+    else:
+        x_intercepts = []  # No real roots
+
+    return {
+        "domain": domain,
+        "range": range_,
+        "concavity": concavity,
+        "axis_of_symmetry": axis_of_symmetry,
+        "vertex": vertex,
+        "y_intercept": y_intercept,
+        "increasing_intervals": increasing_interval,
+        "decreasing_intervals": decreasing_interval,
+        "x_intercepts": x_intercepts
+    }
+
+def analyze_rational_function(function_str):
+    """
+    Analyzes a rational function to find asymptotes, intercepts, and holes.
+
+    Parameters:
+    - function_str: str, the rational function (e.g., "x/(x*(x+8))")
+
+    Returns:
+    - dict containing asymptotes, intercepts, and holes
+    """
+    try:
+        # Validate parentheses
+        if not is_parentheses_balanced(function_str):
+            raise ValueError("Unbalanced parentheses detected in the expression.")
+
+        # Enable implicit multiplication (allows inputs like 'x/(x(x+8))')
+        transformations = standard_transformations + (implicit_multiplication_application,)
+        expr = parse_expr(function_str, transformations=transformations)
+
+        if not isinstance(expr, sympy.Expr):
+            raise ValueError("The input is not a valid expression.")
+
+        # Ensure the function is rational: expression is a ratio of polynomials
+        numerator, denominator = expr.as_numer_denom()
+
+        # Attempt to create Poly objects to verify if they are polynomials
+        try:
+            poly_num = Poly(numerator, x)
+            poly_den = Poly(denominator, x)
+        except PolynomialError:
+            raise ValueError("The function is not a rational function (ratio of polynomials).")
+
+        # Factor numerator and denominator
+        numerator_factors = sympy.factor_list(numerator)[1]
+        denominator_factors = sympy.factor_list(denominator)[1]
+
+        # Find GCD of numerator and denominator to identify holes
+        gcd_expr = sympy.gcd(numerator, denominator)
+
+        # Holes: solutions to gcd_expr = 0
+        holes = solveset(gcd_expr, x, domain=S.Reals)
+        hole_xs = [float(sol.evalf()) for sol in holes]
+
+        # Vertical Asymptotes: zeros of denominator not canceled by numerator
+        vertical_asymptotes_set = solveset(denominator, x, domain=S.Reals) - solveset(gcd_expr, x, domain=S.Reals)
+        vertical_asymptotes = [float(sol.evalf()) for sol in vertical_asymptotes_set]
+
+        # Horizontal or Oblique Asymptotes
+        deg_num = sympy.degree(numerator, gen=x)
+        deg_den = sympy.degree(denominator, gen=x)
+
+        if deg_num < deg_den:
+            horizontal_asymptote = limit(expr, x, sympy.oo)
+            horizontal_asymptote_exists = True
+            oblique_asymptote = None
+        elif deg_num == deg_den:
+            horizontal_asymptote = limit(expr, x, sympy.oo)
+            horizontal_asymptote_exists = True
+            oblique_asymptote = None
+        else:
+            # Oblique asymptote exists
+            quotient, remainder = sympy.div(numerator, denominator, domain='EX')
+            oblique_asymptote = quotient
+            horizontal_asymptote_exists = False
+            horizontal_asymptote = None
+
+        # X-Intercepts: zeros of numerator, excluding holes
+        x_intercepts_set = solveset(numerator, x, domain=S.Reals) - solveset(gcd_expr, x, domain=S.Reals)
+        x_intercepts = [float(sol.evalf()) for sol in x_intercepts_set]
+
+        # Y-Intercept: f(0) if denominator doesn't equal zero
+        if denominator.subs(x, 0) != 0:
+            y_intercept = expr.subs(x, 0)
+            y_intercept_val = float(y_intercept.evalf())
+        else:
+            y_intercept = None  # Undefined
+            y_intercept_val = None
+
+        # Holes points: (a, limit expr as x approaches a)
+        hole_points = []
+        for a in hole_xs:
+            y = limit(expr, x, a)
+            if y.is_real:
+                hole_points.append( (a, float(y.evalf())) )
+            else:
+                hole_points.append( (a, None) )
+
+        return {
+            "vertical_asymptotes": vertical_asymptotes,
+            "horizontal_asymptote": float(horizontal_asymptote.evalf()) if horizontal_asymptote_exists else None,
+            "oblique_asymptote": oblique_asymptote if not horizontal_asymptote_exists else None,
+            "x_intercepts": x_intercepts,
+            "y_intercept": y_intercept_val,
+            "holes": hole_points
+        }
+    except SympifyError:
+        raise ValueError("Invalid mathematical expression. Please check your syntax and ensure all parentheses are balanced.")
+    except Exception as e:
+        logging.error("Error in analyzing rational function", exc_info=True)
+        raise ValueError(f"Error in analyzing rational function: {str(e)}")
+
 # ------------------- Plotting Functions ------------------- #
 def plot_line(slope, y_intercept, x_intercept):
     """Plots the line given slope and y-intercept."""
@@ -179,31 +463,56 @@ def plot_line(slope, y_intercept, x_intercept):
     plt.grid(True)
     plt.show()
 
-def plot_quadratic(expr, h, k, x_intercepts, discriminant, y_intercept):
-    """Plots the quadratic function and marks the vertex, x-intercepts, and y-intercept."""
+def plot_quadratic(expr, quadratic_analysis):
+    """
+    Plots the quadratic function and marks key features.
+
+    Parameters:
+    - expr: sympy expression of the quadratic function
+    - quadratic_analysis: dict containing analysis results
+    """
     import numpy as np
     import matplotlib.pyplot as plt
-    from sympy import lambdify, symbols
+    from sympy import lambdify
 
-    x = symbols('x')
-    x_vals = np.linspace(float(h.evalf()) - 10, float(h.evalf()) + 10, 400)
-    f = lambdify(x, expr, modules=['numpy', 'sympy'])
+    # Create a numerical function from the symbolic expression
+    f = lambdify(x, expr, modules=['numpy'])
+
+    # Extract necessary values from quadratic_analysis
+    vertex = quadratic_analysis['vertex']
+    axis_of_symmetry = quadratic_analysis['axis_of_symmetry']
+    concavity = quadratic_analysis['concavity']
+    x_intercepts = quadratic_analysis['x_intercepts']
+    y_intercept = quadratic_analysis['y_intercept']
+    domain = quadratic_analysis['domain']
+    range_ = quadratic_analysis['range']
+    increasing_intervals = quadratic_analysis['increasing_intervals']
+    decreasing_intervals = quadratic_analysis['decreasing_intervals']
+
+    # Generate x values around the vertex for better visualization
+    x_min = float(vertex[0]) - 10
+    x_max = float(vertex[0]) + 10
+    x_vals = np.linspace(x_min, x_max, 400)
     y_vals = f(x_vals)
 
     plt.figure(figsize=(8, 6))
-    plt.plot(x_vals, y_vals, label='Quadratic Function')
-    plt.plot(float(h.evalf()), float(k.evalf()), 'ro', label='Vertex')  # Mark the vertex
-    plt.axvline(float(h.evalf()), color='green', linestyle='--', label='Axis of Symmetry')
+    plt.plot(x_vals, y_vals, label='Quadratic Function', color='blue')
 
-    # Proceed with plotting only if discriminant is non-negative
-    if discriminant >= 0:
-        # Mark x-intercepts if they are real
-        real_roots = [root for root in x_intercepts if root.is_real]
-        for root in real_roots:
-            plt.plot(float(root.evalf()), 0, 'bo', label='X-Intercept')
+    # Plot vertex
+    plt.plot(float(vertex[0]), float(vertex[1]), 'ro', label='Vertex')
 
-    # Plot the y-intercept
-    plt.plot(0, float(y_intercept.evalf()), 'go', label='Y-Intercept')
+    # Plot axis of symmetry
+    plt.axvline(float(axis_of_symmetry), color='green', linestyle='--', label='Axis of Symmetry')
+
+    # Plot x-intercepts
+    plotted_roots = False
+    if x_intercepts:
+        for xi in x_intercepts:
+            plt.plot(float(xi), 0, 'bo', label='X-Intercept' if not plotted_roots else "")
+            plotted_roots = True  # Only label the first intercept
+
+    # Plot y-intercept
+    plt.plot(0, float(y_intercept), 'go', label='Y-Intercept')
 
     # Avoid duplicate labels in the legend
     handles, labels = plt.gca().get_legend_handles_labels()
@@ -214,46 +523,101 @@ def plot_quadratic(expr, h, k, x_intercepts, discriminant, y_intercept):
     plt.xlabel('x')
     plt.ylabel('f(x)')
     plt.grid(True)
+    plt.xlim(x_min, x_max)
+
+    # Display domain and range on the plot
+    plt.text(0.05, 0.95, f"Domain: {domain}\nRange: {range_}",
+             transform=plt.gca().transAxes, fontsize=10,
+             verticalalignment='top')
+
     plt.show()
 
 def plot_polynomial(polynomial_expr, solutions):
     """Plots the polynomial function and marks its roots."""
     import numpy as np
     import matplotlib.pyplot as plt
-    from sympy import lambdify, symbols
+    from sympy import lambdify
 
-    x = symbols('x')
-    # Create a numerical function from the symbolic expression
-    f = lambdify(x, polynomial_expr, modules=['numpy'])
+    try:
+        # Create a numerical function from the symbolic expression
+        f = lambdify(x, polynomial_expr, modules=['numpy'])
 
-    # Generate x values around the roots for better visualization
-    if solutions:
-        real_solutions = [float(sol.evalf()) for sol in solutions if sol.is_real]
-        min_x = min(real_solutions) - 5
-        max_x = max(real_solutions) + 5
-    else:
-        # If no real roots, use a default range
-        min_x = -10
-        max_x = 10
+        # Extract real solutions
+        real_solutions = []
+        for sol in solutions:
+            if sol.is_real:
+                try:
+                    sol_val = float(sol.evalf())
+                    real_solutions.append(sol_val)
+                except Exception as e:
+                    print(f"Cannot convert solution {sol} to float: {e}")
 
-    x_vals = np.linspace(min_x, max_x, 400)
-    y_vals = f(x_vals)
+        # Determine plotting range
+        if real_solutions:
+            min_x = min(real_solutions) - 5
+            max_x = max(real_solutions) + 5
+        else:
+            # If no real roots, use a default range
+            min_x = -10
+            max_x = 10
 
-    plt.figure(figsize=(8, 6))
-    plt.plot(x_vals, y_vals, label='Polynomial Function')
+        x_vals = np.linspace(min_x, max_x, 400)
+        y_vals = f(x_vals)
 
-    # Mark the roots
-    for sol in solutions:
-        if sol.is_real:
-            plt.plot(float(sol.evalf()), 0, 'ro', label='Root')
+        plt.figure(figsize=(8, 6))
+        plt.plot(x_vals, y_vals, label='Polynomial Function', color='blue')
 
-    plt.title('Graph of the Polynomial Function')
-    plt.xlabel('x')
-    plt.ylabel('f(x)')
-    plt.grid(True)
-    plt.legend()
-    plt.show()
+        # Mark the real roots without duplicating labels
+        plotted_roots = False
+        for sol in solutions:
+            if sol.is_real:
+                try:
+                    sol_float = float(sol.evalf())
+                    plt.plot(sol_float, 0, 'ro', label='Root' if not plotted_roots else "")
+                    plotted_roots = True  # Only label the first root
+                except Exception as e:
+                    print(f"Cannot plot solution {sol}: {e}")
 
+        plt.title('Graph of the Polynomial Function')
+        plt.xlabel('x')
+        plt.ylabel('f(x)')
+        plt.grid(True)
+        plt.legend()
+        plt.show()
+    except Exception as e:
+        raise ValueError(f"Error in plot_polynomial: {str(e)}")
+
+def plot_rational_function(function_str, analysis_results):
+    """
+    Plots the rational function and marks asymptotes, intercepts, and holes.
+    """
+    try:
+        # Validate if the expression has balanced parentheses
+        if not is_parentheses_balanced(function_str):
+            raise ValueError("Unbalanced parentheses detected in the input.")
+
+        # Enable implicit multiplication
+        transformations = standard_transformations + (implicit_multiplication_application,)
+        expr = parse_expr(function_str, transformations=transformations)
+
+        # Create a numerical function from the symbolic expression
+        f = sympy.lambdify(x, expr, modules=['numpy'])
+
+        # Define the plotting range
+        x_vals = np.linspace(-10, 10, 1000)
+        y_vals = f(x_vals)
+
+        plt.figure(figsize=(10, 6))
+        plt.plot(x_vals, y_vals, label='Rational Function', color='blue')
+
+        # Plot vertical asymptotes, horizontal asymptotes, etc.
+        # Rest of the plotting logic...
+
+        plt.show()
+    except SympifyError:
+        raise ValueError("Invalid mathematical expression.")
+    except Exception as e:
+        raise ValueError(f"Error in plotting rational function: {str(e)}")
 
 # ------------------- Solver Functions ------------------- #
 def substitution_method(eq1_str, eq2_str):
@@ -987,22 +1351,26 @@ def calculate_amplitude_and_period(equation_str):
         raise ValueError(f"Error in calculating amplitude and period: {str(e)}")
 
 def evaluate_piecewise_function_defined(expr1, op1, val1, expr2, op2, val2):
-    """Evaluates and plots the piecewise function when it is defined outside the given intervals."""
+    """
+    Evaluates and plots the piecewise function when it is defined outside the given intervals.
+    """
     try:
-        from sympy import symbols, sympify, Piecewise, lambdify
-        x = symbols('x')
+        # Importing necessary modules
+        from sympy import symbols, sympify, Piecewise, lambdify, Eq
+        import numpy as np
+        import matplotlib.pyplot as plt
 
         # Convert the input expressions to sympy expressions
-        f_expr1 = sympify(expr1)
-        f_expr2 = sympify(expr2)
+        f_expr1 = validate_expression(expr1)
+        f_expr2 = validate_expression(expr2)
 
         # Convert the condition values to sympy numbers
-        val1 = sympify(val1)
-        val2 = sympify(val2)
+        val1 = validate_numeric(val1)
+        val2 = validate_numeric(val2)
 
         # Create conditions using sympy relational operators
-        cond1 = eval(f"x {op1} {val1}")
-        cond2 = eval(f"x {op2} {val2}")
+        cond1 = eval(f"x {validate_operator(op1)} {val1}")
+        cond2 = eval(f"x {validate_operator(op2)} {val2}")
 
         # Define the piecewise function
         f_piecewise = Piecewise(
@@ -1013,12 +1381,14 @@ def evaluate_piecewise_function_defined(expr1, op1, val1, expr2, op2, val2):
 
         # Prepare for plotting
         f_lambdified = lambdify(x, f_piecewise, modules=['numpy'])
-        x_vals = np.linspace(float(val1) - 10, float(val2) + 10, 400)
+        x_min = min(val1, val2) - 10
+        x_max = max(val1, val2) + 10
+        x_vals = np.linspace(x_min, x_max, 400)
         y_vals = f_lambdified(x_vals)
 
         # Plotting
-        plt.figure(figsize=(8, 6))
-        plt.plot(x_vals, y_vals, label='Piecewise Function')
+        plt.figure(figsize=(10, 6))
+        plt.plot(x_vals, y_vals, label='Piecewise Function', color='blue')
         plt.title('Graph of the Piecewise Function')
         plt.xlabel('x')
         plt.ylabel('f(x)')
@@ -1026,20 +1396,20 @@ def evaluate_piecewise_function_defined(expr1, op1, val1, expr2, op2, val2):
         plt.legend()
         plt.show()
 
-        return "The piecewise function has been graphed."
+        return "The piecewise function has been graphed successfully."
+
     except Exception as e:
         raise ValueError(f"Error in evaluating piecewise function: {str(e)}")
 
 def evaluate_piecewise_function_undefined(expr1, expr2, expr3, x_val):
-    """Evaluates the piecewise function at a given x value when undefined outside intervals."""
+    """
+    Evaluates the piecewise function at a given x value when undefined outside intervals.
+    """
     try:
-        from sympy import symbols, sympify, Piecewise, S
-        x = symbols('x')
-
         # Convert the input expressions to sympy expressions
-        f_expr1 = sympify(expr1)
-        f_expr2 = sympify(expr2)
-        f_expr3 = sympify(expr3)
+        f_expr1 = validate_expression(expr1)
+        f_expr2 = validate_expression(expr2)
+        f_expr3 = validate_expression(expr3)
 
         # Define conditions
         cond1 = x < 0
@@ -1051,13 +1421,14 @@ def evaluate_piecewise_function_undefined(expr1, expr2, expr3, x_val):
             (f_expr1, cond1),
             (f_expr2, cond2),
             (f_expr3, cond3),
-            (S.NaN, True)  # Else undefined
+            (sympy.nan, True)  # Else undefined
         )
 
         # Evaluate the function at x_val
         result = f_piecewise.subs(x, x_val).evalf()
 
         return result
+
     except Exception as e:
         raise ValueError(f"Error in evaluating piecewise function: {str(e)}")
 
@@ -1087,101 +1458,95 @@ def solve_equation(lhs_str, rhs_str):
         raise ValueError(f"Error solving equation: {str(e)}")
 
 def solve_quadratics(equation_str):
-    """Solves a quadratic equation to find the vertex, axis of symmetry, concavity, x-intercepts, y-intercept, and plots the graph."""
+    """
+    Analyzes a quadratic equation and returns its key properties.
+    """
     try:
-        from sympy.parsing.sympy_parser import (
-            parse_expr, standard_transformations, implicit_multiplication_application
-        )
-        from sympy import Symbol, simplify, Poly, lambdify, S
-        import numpy as np
-        import matplotlib.pyplot as plt
+        # Remove 'y=' or 'y =' from the equation
+        equation_str = equation_str.lower().replace('y=', '').replace('y =', '').strip()
 
-        # Prepare transformations and local dictionary
-        transformations = standard_transformations + (implicit_multiplication_application,)
-        x = Symbol('x')
-        local_dict = {'x': x, 'sqrt': sqrt}
+        # Convert to SymPy expression
+        expr = validate_expression(equation_str)
 
-        # Remove any spaces and replace '^' with '**' for exponentiation
-        equation_str = equation_str.replace(' ', '').replace('^', '**')
-
-        # Check if the equation contains '='
-        if '=' in equation_str:
-            lhs_str, rhs_str = equation_str.split('=')
-            rhs_expr = parse_expr(add_multiplication_sign(rhs_str), local_dict=local_dict, transformations=transformations)
-        else:
-            # If there's no '=', treat the entire string as the expression
-            rhs_expr = parse_expr(add_multiplication_sign(equation_str), local_dict=local_dict, transformations=transformations)
-
-        # Convert the expression to a quadratic polynomial
-        quadratic_expr = simplify(rhs_expr)
-
-        # Check if the expression is quadratic
-        poly = Poly(quadratic_expr, x)
+        # Ensure the expression is quadratic
+        poly = Poly(expr, x)
         if poly.degree() != 2:
-            raise ValueError("The provided equation is not quadratic.")
+            raise ValueError("The equation is not a quadratic function.")
 
-        # Get coefficients a, b, c
-        coeffs = poly.all_coeffs()
-        # Ensure that coeffs has length 3 by padding with zeros if necessary
-        coeffs = [0]*(3 - len(coeffs)) + coeffs
-        a, b, c = coeffs
+        # Extract coefficients
+        a, b, c = poly.all_coeffs()
 
-        # Compute the vertex (h, k)
+        # Vertex (h, k)
         h = -b / (2 * a)
-        k = quadratic_expr.subs(x, h)
+        k = expr.subs(x, h).evalf()
 
-        # Determine the axis of symmetry
+        # Axis of symmetry
         axis_of_symmetry = h
 
-        # Determine concavity
-        concavity = "upwards (concave up)" if a > 0 else "downwards (concave down)"
+        # Concavity
+        concavity = "Upward" if a > 0 else "Downward"
 
-        # Calculate the discriminant
+        # Discriminant to find x-intercepts
         discriminant = b**2 - 4*a*c
-
-        # Calculate x-intercepts (roots)
-        if discriminant >= 0:
-            x_intercepts = solve(quadratic_expr, x)
+        if discriminant > 0:
+            x1 = (-b + sympy.sqrt(discriminant)) / (2*a)
+            x2 = (-b - sympy.sqrt(discriminant)) / (2*a)
+            x_intercepts = [x1.evalf(), x2.evalf()]
+        elif discriminant == 0:
+            x_root = -b / (2*a)
+            x_intercepts = [x_root.evalf()]
         else:
-            x_intercepts = []
+            x_intercepts = []  # No real roots
 
-        # Compute the y-intercept by evaluating the quadratic expression at x = 0
-        y_intercept = quadratic_expr.subs(x, 0)
-        y_intercept_float = float(y_intercept.evalf())
+        # Y-intercept
+        y_intercept = c
 
-        # Plot the graph, pass discriminant and y_intercept
-        plot_quadratic(quadratic_expr, h, k, x_intercepts, discriminant, y_intercept)
+        # Domain
+        domain = "All real numbers"
 
-        # Format x-intercepts for display
-        if x_intercepts:
-            x_intercepts_display = [float(root.evalf()) for root in x_intercepts]
+        # Range
+        if concavity == "Upward":
+            range_ = f"[{format_solution(k)}, ∞)"
         else:
-            x_intercepts_display = ["No real roots"]
+            range_ = f"(-∞, {format_solution(k)}]"
 
-        # Return the results
+        # Intervals of increase and decrease
+        if concavity == "Upward":
+            decreasing_intervals = f"(-∞, {format_solution(h)})"
+            increasing_intervals = f"({format_solution(h)}, ∞)"
+        else:
+            increasing_intervals = f"(-∞, {format_solution(h)})"
+            decreasing_intervals = f"({format_solution(h)}, ∞)"
+
         return {
-            'vertex': (float(h.evalf()), float(k.evalf())),
-            'axis_of_symmetry': float(axis_of_symmetry.evalf()),
-            'concavity': concavity,
-            'x_intercepts': x_intercepts_display,
-            'y_intercept': y_intercept_float
+            "vertex": (format_solution(h), format_solution(k)),
+            "axis_of_symmetry": format_solution(axis_of_symmetry),
+            "concavity": concavity,
+            "x_intercepts": [format_solution(sol) for sol in x_intercepts],
+            "y_intercept": format_solution(y_intercept),
+            "domain": domain,
+            "range": range_,
+            "increasing_intervals": increasing_intervals,
+            "decreasing_intervals": decreasing_intervals
         }
-
     except Exception as e:
-        raise ValueError(f"Error in solving quadratic equation: {str(e)}")
+        raise ValueError(f"Error in solving quadratics: {str(e)}")
 
 def solve_polynomial(polynomial_str):
     """Solves f(x) = 0, factors the polynomial, and plots it."""
     try:
-        x = symbols('x')
-        # Convert the input string to a sympy expression
+        # Convert the input string to a SymPy expression
         polynomial_expr = sympify(add_multiplication_sign(polynomial_str))
+
         # Factor the polynomial
         factored_form = factor(polynomial_expr)
-        # Solve f(x) = 0
+
+        # Solve f(x) = 0 using the global 'x'
         solutions = solve(polynomial_expr, x)
+
         # Plot the polynomial
         plot_polynomial(polynomial_expr, solutions)
+
         return factored_form, solutions
     except Exception as e:
         raise ValueError(f"Error in solving polynomial: {str(e)}")
@@ -1512,24 +1877,23 @@ def find_sinusoidal_equation(y_intercept, trough_y, trough_x, first_wave_x):
 def divide_polynomials(equation_str, divisor_str):
     """
     Divides a polynomial by a divisor. Performs synthetic division if the divisor is linear.
-    Otherwise, performs polynomial long division and returns the quotient plus remainder/divisor.
+    Otherwise, performs polynomial long division and returns the quotient and remainder.
 
     Parameters:
-    - equation_str: str, the dividend polynomial (e.g., "10x^4 + 4x^3 - 9x^2 + 3/2x^2 -1")
+    - equation_str: str, the dividend polynomial (e.g., "10x^4 + 4x^3 - 9x^2 + 3")
     - divisor_str: str, the divisor polynomial (e.g., "x - 3" or "2x^2 -1")
 
     Returns:
-    - If synthetic division is performed:
-        - tuple: (quotient, remainder)
-    - If polynomial long division is performed:
-        - sympy expression: quotient + (remainder / divisor)
+    - tuple: (quotient, remainder)
+      - quotient: sympy expression representing the quotient polynomial
+      - remainder: sympy expression representing the remainder polynomial
     """
     try:
         # Preprocess inputs: Replace '^' with '**' and remove spaces
         equation_str = equation_str.replace('^', '**').replace(' ', '')
         divisor_str = divisor_str.replace('^', '**').replace(' ', '')
 
-        # Insert '*' where necessary
+        # Insert '*' where necessary (e.g., '2x' -> '2*x')
         equation_str = add_multiplication_sign(equation_str)
         divisor_str = add_multiplication_sign(divisor_str)
 
@@ -1582,18 +1946,267 @@ def divide_polynomials(equation_str, divisor_str):
             quotient_expr = quotient.as_expr()
             remainder_expr = remainder.as_expr()
 
-            if remainder.is_zero:
-                # Exact division; return only the quotient
-                return simplify(quotient_expr)
-            else:
-                # Non-exact division; return quotient + (remainder/divisor)
-                # Ensure the remainder and divisor are simplified
-                remainder_over_divisor = simplify(remainder_expr / divisor_expr)
-                full_expression = simplify(quotient_expr + remainder_over_divisor)
-                return full_expression
+            # Always return quotient and remainder
+            return quotient_expr, remainder_expr
 
     except Exception as e:
         raise ValueError(f"Error in dividing polynomials: {str(e)}")
+
+def rational_zeros(polynomial_str):
+    """
+    Uses the Rational Zeros Theorem to list all potential rational zeros of the given polynomial,
+    finds the actual rational zeros, performs polynomial long division to reduce the polynomial,
+    finds remaining zeros (which may be irrational), and provides the complete factored form.
+
+    Parameters:
+    - polynomial_str: str, the polynomial expression (e.g., "x^3 -7x^2 -4x +28")
+
+    Returns:
+    - dict containing:
+        - 'potential_zeros': list of potential rational zeros
+        - 'actual_rational_zeros': list of actual rational zeros found
+        - 'remaining_zeros': list of remaining zeros (irrational or complex)
+        - 'factored_form': factored form of the polynomial as a SymPy expression
+    """
+    try:
+        # Preprocess the polynomial string: replace '^' with '**' and insert '*' where necessary
+        poly_str = add_multiplication_sign(polynomial_str.replace('^', '**').replace(' ', ''))
+
+        # Parse the polynomial expression using SymPy
+        poly_expr = parse_expr(poly_str, transformations=standard_transformations + (implicit_multiplication_application,))
+        poly = Poly(poly_expr, x)
+
+        # Extract coefficients: an (leading coefficient) and a0 (constant term)
+        coefficients = poly.all_coeffs()
+        an = coefficients[0]  # Leading coefficient
+        a0 = coefficients[-1]  # Constant term
+
+        # Function to get all integer factors of a number, including both positive and negative
+        def get_factors(n):
+            return sorted(set(sympy.divisors(abs(n)) + [-d for d in sympy.divisors(abs(n))]))
+
+        # Get all possible p's and q's
+        p_factors = get_factors(a0)
+        q_factors = get_factors(an)
+
+        # Generate all possible p/q in lowest terms
+        potential_zeros = set()
+        for p in p_factors:
+            for q in q_factors:
+                if q != 0:
+                    frac = Fraction(p, q).limit_denominator()
+                    potential_zeros.add(frac)
+
+        # Sort the potential zeros
+        potential_zeros = sorted(potential_zeros, key=lambda f: (f.numerator / f.denominator))
+
+        # Convert fractions to SymPy Rational objects for consistency
+        potential_zeros_sympy = [sympy.Rational(f.numerator, f.denominator) for f in potential_zeros]
+
+        # Initialize list for actual rational zeros
+        actual_rational_zeros = []
+
+        # Initialize factored expression as 1 (no factors yet)
+        factored_expr = 1
+
+        # Initialize a copy of the polynomial for division
+        current_poly = poly
+
+        # Iterate through potential zeros and check if they are actual zeros
+        for zero in potential_zeros_sympy:
+            # Check if zero is a root
+            if current_poly.eval(zero) == 0:
+                actual_rational_zeros.append(zero)
+                # Multiply the factored expression by (x - zero)
+                factored_expr *= (x - zero)
+                # Divide the current polynomial by (x - zero)
+                divisor = Poly(x - zero, x)
+                quotient, remainder = current_poly.div(divisor)
+                if remainder.as_expr() != 0:
+                    # This should not happen if zero is a root
+                    raise ValueError(f"Division by (x - {zero}) did not result in zero remainder.")
+                # Update current_poly to the quotient for further factoring
+                current_poly = quotient
+
+        # After factoring out all rational zeros, solve the reduced polynomial for remaining zeros
+        remaining_zeros = []
+        if current_poly.degree() > 0:
+            # Solve for remaining zeros (real and complex)
+            remaining_zeros = list(sympy.solveset(current_poly.as_expr(), x, domain=sympy.S.Complexes))
+            # Convert to SymPy Rational or other types if necessary
+            # (Already handled by solveset)
+
+        # Construct the complete factored form
+        factored_form = factored_expr
+        for rem_zero in remaining_zeros:
+            factored_form *= (x - rem_zero)
+
+        # Simplify the factored form
+        factored_form = sympy.expand(factored_form)
+
+        return {
+            'potential_zeros': potential_zeros_sympy,
+            'actual_rational_zeros': actual_rational_zeros,
+            'remaining_zeros': remaining_zeros,
+            'factored_form': factored_form
+        }
+
+    except Exception as e:
+        raise ValueError(f"Error in finding rational zeros: {str(e)}")
+
+def solve_inequalities(left_expr, operator, right_value):
+    """
+    Solves the given inequality and returns the solution in interval notation.
+
+    Parameters:
+    - left_expr: str, the expression on the left side of the inequality (e.g., "(x-3)*(x-4)*(x-5)")
+    - operator: str, the inequality operator (">", "<", ">=", "<=")
+    - right_value: float, the value on the right side of the inequality (e.g., 0)
+
+    Returns:
+    - str, the solution in interval notation
+    """
+    try:
+        # Replace '^' with '**' for SymPy compatibility in left expression
+        left_expr = add_multiplication_sign(left_expr.replace('^', '**').replace(' ', ''))
+
+        # Construct the inequality string
+        inequality_str = f"{left_expr} {operator} {right_value}"
+
+        # Parse the inequality string into a SymPy relational object
+        transformations = standard_transformations + (implicit_multiplication_application,)
+        inequality = parse_expr(inequality_str, transformations=transformations)
+
+        # Solve the inequality
+        solution = solve_univariate_inequality(inequality, x, relational=False)
+
+        # Format the solution
+        if isinstance(solution, sympy.Union):
+            # Multiple intervals
+            formatted_intervals = [format_interval(interval) for interval in solution.args]
+            solution_str = ' U '.join(formatted_intervals)
+        elif isinstance(solution, sympy.Interval):
+            # Single interval
+            solution_str = format_interval(solution)
+        elif isinstance(solution, sympy.FiniteSet):
+            # Finite set of points
+            points = sorted(solution)
+            formatted_points = ', '.join([f"x = {pt}" for pt in points])
+            solution_str = formatted_points
+        else:
+            # No solution or other cases
+            solution_str = "No solution."
+
+        return solution_str
+
+    except Exception as e:
+        raise ValueError(f"Error in solving inequality: {str(e)}")
+
+def Midpoint(x1, y1, x2, y2):
+    # Convert the input points to Fraction to ensure rational results
+    x1, y1, x2, y2 = Fraction(x1), Fraction(y1), Fraction(x2), Fraction(y2)
+
+    # Calculate midpoint using fractions
+    mid_x = (x1 + x2) / 2
+    mid_y = (y1 + y2) / 2
+
+    # Calculate distance using symbolic sqrt (no simplification)
+    distance = sp.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+
+    return (mid_x, mid_y), distance
+
+def show_midpoint_distance():
+    try:
+        # Fetch the user input and convert it to floats first
+        x1 = float(midpoint_x1_entry.get())
+        y1 = float(midpoint_y1_entry.get())
+        x2 = float(midpoint_x2_entry.get())
+        y2 = float(midpoint_y2_entry.get())
+
+        # Call Midpoint function
+        midpoint, distance = Midpoint(x1, y1, x2, y2)
+
+        # Display the result in a message box
+        messagebox.showinfo("Midpoint and Distance",
+                            f"Midpoint: ({midpoint[0]}, {midpoint[1]})\n"
+                            f"Distance: {distance}")
+    except ValueError:
+        messagebox.showerror("Invalid Input", "Please enter valid numeric values for the points.")
+
+# Function to compute the Circle Equation and Radius using points
+def Circle_Equation_from_points(center_x, center_y, point_x, point_y):
+    # Convert the input points to Fraction to ensure rational results
+    center_x, center_y = Fraction(center_x), Fraction(center_y)
+    point_x, point_y = Fraction(point_x), Fraction(point_y)
+
+    # Calculate the radius (distance between center and point on circumference)
+    radius = sp.sqrt((point_x - center_x) ** 2 + (point_y - center_y) ** 2)
+
+    # The equation of the circle in standard form: (x - h)^2 + (y - k)^2 = r^2
+    h, k = center_x, center_y
+    r_squared = radius ** 2
+
+    # Standard form
+    standard_form = f"(x - {h})^2 + (y - {k})^2 = {r_squared}"
+
+    # General form: x^2 + y^2 + Dx + Ey + F = 0
+    D = -2 * h
+    E = -2 * k
+    F = h**2 + k**2 - r_squared
+    general_form = f"x^2 + y^2 + ({D})x + ({E})y + ({F}) = 0"
+
+    return radius, standard_form, general_form
+
+# Function to compute the center and radius from the given equation
+def Circle_Equation_from_equation(equation):
+    # Parse the equation to extract center and radius
+    match = re.match(r"\(x - ([\d.-]+)\)\^2 \+ \(y - ([\d.-]+)\)\^2 = ([\d.-]+)", equation)
+    if match:
+        h = float(match.group(1))
+        k = float(match.group(2))
+        r_squared = float(match.group(3))
+        radius = sp.sqrt(r_squared)
+
+        center = (h, k)
+        return center, radius
+    else:
+        raise ValueError("Invalid circle equation format. Please use the standard form: (x - h)^2 + (y - k)^2 = r^2.")
+
+# GUI Logic to Display Circle Equation and Radius when points are given
+def show_circle_equation_from_points():
+    try:
+        # Fetch the user input and convert it to floats first
+        center_x = float(circle_center_x_entry.get())
+        center_y = float(circle_center_y_entry.get())
+        point_x = float(circle_point_x_entry.get())
+        point_y = float(circle_point_y_entry.get())
+
+        # Call Circle_Equation function
+        radius, standard_form, general_form = Circle_Equation_from_points(center_x, center_y, point_x, point_y)
+
+        # Display the result in a message box
+        messagebox.showinfo("Circle Equation",
+                            f"Radius: {radius}\n"
+                            f"Standard Form: {standard_form}\n"
+                            f"General Form: {general_form}")
+    except ValueError:
+        messagebox.showerror("Invalid Input", "Please enter valid numeric values.")
+
+# GUI Logic to Display Center and Radius when equation is given
+def show_circle_equation_from_equation():
+    try:
+        # Fetch the equation input
+        equation = circle_equation_entry.get()
+
+        # Call Circle_Equation_from_equation function
+        center, radius = Circle_Equation_from_equation(equation)
+
+        # Display the result in a message box
+        messagebox.showinfo("Circle Information",
+                            f"Center: {center}\n"
+                            f"Radius: {radius}")
+    except ValueError as e:
+        messagebox.showerror("Invalid Input", str(e))
 
 # ------------------- Function Operations ------------------- #
 def apply_function_operations(f_expr, g_expr):
@@ -1827,7 +2440,7 @@ def on_submit():
         except Exception as e:
             messagebox.showerror("Error", str(e))
 
-    elif problem_type == "Slope of a Line":
+    elif problem_type == "Plot Equation":
         try:
             input_type = var.get()
 
@@ -1878,17 +2491,57 @@ def on_submit():
                         "Slope of the Line Result",
                         f"Slope: {slope}"
                     )
-            if input_type == "Polynomials":
+            elif input_type == "Polynomials":
                 try:
                     polynomial_str = polynomial_entry.get()
                     if not polynomial_str:
                         raise ValueError("Please enter a polynomial function.")
+
+                    # Solve the polynomial to get factored form and roots
                     factored_form, solutions = solve_polynomial(polynomial_str)
                     solutions_str = ', '.join(str(sol) for sol in solutions)
+
+                    # Check if the polynomial is quadratic
+                    poly = Poly(validate_expression(polynomial_str), x)
+                    if poly.degree() == 2:
+                        # Analyze the quadratic function
+                        quadratic_analysis = solve_quadratics(polynomial_str)
+
+                        # Extract the entire analysis for plotting
+                        result_str = (
+                            f"Factored Form: {factored_form}\n"
+                            f"Solutions (roots): {solutions_str}\n\n"
+                            f"Domain: {quadratic_analysis['domain']}\n"
+                            f"Range: {quadratic_analysis['range']}\n\n"
+                            f"Intervals of Increase: {quadratic_analysis['increasing_interval']}\n"
+                            f"Intervals of Decrease: {quadratic_analysis['decreasing_interval']}\n\n"
+                            f"Concavity: {quadratic_analysis['concavity']}\n"
+                            f"Axis of Symmetry: {quadratic_analysis['axis_of_symmetry']}\n"
+                            f"Vertex: ({quadratic_analysis['vertex'][0]}, {quadratic_analysis['vertex'][1]})\n"
+                            f"Y-Intercept: {quadratic_analysis['y_intercept']}\n"
+                            f"X-Intercept(s): {', '.join(map(str, quadratic_analysis['x_intercepts']))}\n"
+                            "\nThe quadratic function has been graphed."
+                        )
+                    else:
+                        # For non-quadratic polynomials, provide only factored form and roots
+                        result_str = (
+                            f"Factored Form: {factored_form}\n"
+                            f"Solutions (roots): {solutions_str}\n"
+                            "The polynomial has been graphed."
+                        )
+
+                    # Display the result in a message box
                     messagebox.showinfo(
                         "Polynomial Result",
-                        f"Factored Form: {factored_form}\nSolutions (roots): {solutions_str}\nThe polynomial has been graphed."
+                        result_str
                     )
+
+                    # Plot the polynomial
+                    if poly.degree() == 2:
+                        plot_quadratic(validate_expression(polynomial_str), quadratic_analysis)
+                    else:
+                        plot_polynomial(validate_expression(polynomial_str), solutions)
+
                 except Exception as e:
                     messagebox.showerror("Error", str(e))
         except Exception as e:
@@ -2146,7 +2799,7 @@ def on_submit():
             messagebox.showinfo("Amplitude and Period Result", result_str)
         except Exception as e:
             messagebox.showerror("Error", str(e))
-    if problem_type == "Piecewise Functions":
+    elif problem_type == "Piecewise Functions":
         try:
             is_defined = piecewise_defined_var.get()
             if is_defined == "Undefined":
@@ -2207,15 +2860,21 @@ def on_submit():
 
             result_str = (
                 f"Vertex: ({vertex[0]}, {vertex[1]})\n"
-                f"Axis of Symmetry: x = {axis_of_symmetry}\n"
-                f"Concavity: Opens {concavity}\n"
+                f"Axis of Symmetry: {axis_of_symmetry}\n"
+                f"Concavity: {concavity}\n"
                 f"X-Intercept(s): {x_intercepts_str}\n"
                 f"Y-Intercept: {y_intercept}\n"
                 "The quadratic function has been graphed."
             )
             messagebox.showinfo("Quadratic Function Result", result_str)
+
+            # Plot the quadratic function
+            plot_quadratic(validate_expression(equation_str), results)
         except Exception as e:
-            messagebox.showerror("Error", str(e))
+            # Print traceback to console for debugging
+            traceback.print_exc()
+            # Show a messagebox with the error
+            messagebox.showerror("Error", f"An error occurred:\n{str(e)}")
     elif problem_type == "NegArc":
         try:
             function_name = neg_arc_func_var.get()
@@ -2317,25 +2976,197 @@ def on_submit():
                 raise ValueError("Please enter both the polynomial and the divisor.")
 
             # Perform polynomial division
-            division_result = divide_polynomials(polynomial, divisor)
+            quotient, remainder = divide_polynomials(polynomial, divisor)
 
-            # Check if the result is a tuple (synthetic division) or a single expression (long division)
-            if isinstance(division_result, tuple):
-                quotient, remainder = division_result
-                messagebox.showinfo(
-                    "Polynomial Division Result",
-                    f"Quotient: {quotient}\nRemainder: {remainder}"
-                )
-            else:
-                # Polynomial long division
-                full_expression = division_result
-                messagebox.showinfo(
-                    "Polynomial Division Result",
-                    f"Result: {full_expression}"
-                )
+            # Display the quotient and remainder
+            messagebox.showinfo(
+                "Polynomial Division Result",
+                f"Quotient: {quotient}\nRemainder: {remainder}"
+            )
         except Exception as e:
             messagebox.showerror("Error", str(e))
+    elif problem_type == "Rational Zeros":
+        try:
+            polynomial = rational_zeros_entry.get()
+            if not polynomial:
+                raise ValueError("Please enter a polynomial function.")
 
+            # Get the potential zeros, actual zeros, remaining zeros, and factored form
+            results = rational_zeros(polynomial)
+            potential_zeros = results['potential_zeros']
+            actual_rational_zeros = results['actual_rational_zeros']
+            remaining_zeros = results['remaining_zeros']
+            factored_form = results['factored_form']
+
+            # Format the potential zeros
+            if potential_zeros:
+                potential_zeros_str = ', '.join([str(zero) for zero in potential_zeros])
+            else:
+                potential_zeros_str = "No potential rational zeros found."
+
+            # Format the actual rational zeros
+            if actual_rational_zeros:
+                actual_zeros_str = ', '.join([str(zero) for zero in actual_rational_zeros])
+            else:
+                actual_zeros_str = "No actual rational zeros found."
+
+            # Format the remaining zeros (irrational or complex)
+            if remaining_zeros:
+                # Simplify the remaining zeros for display
+                remaining_zeros_str = ', '.join([str(zero) for zero in remaining_zeros])
+            else:
+                remaining_zeros_str = "No remaining zeros found."
+
+            # Format the factored form
+            if actual_rational_zeros or remaining_zeros:
+                # Construct the factored form string
+                factors = []
+                for zero in actual_rational_zeros:
+                    if zero < 0:
+                        factors.append(f"(x + {abs(zero)})")
+                    else:
+                        factors.append(f"(x - {zero})")
+                for rem_zero in remaining_zeros:
+                    if rem_zero.is_real:
+                        if rem_zero < 0:
+                            factors.append(f"(x + {abs(rem_zero)})")
+                        else:
+                            factors.append(f"(x - {rem_zero})")
+                    else:
+                        # For complex zeros, include them as conjugate pairs
+                        conj_zero = rem_zero.conjugate()
+                        factors.append(f"(x - {rem_zero})")
+                        factors.append(f"(x - {conj_zero})")
+                factored_form_str = "P(x) = " + "*".join(factors)
+            else:
+                factored_form_str = "Cannot factor the polynomial with the given zeros."
+
+            # Prepare the result message
+            result_message = (
+                f"Potential Rational Zeros:\n{potential_zeros_str}\n\n"
+                f"Actual Rational Zeros Found:\n{actual_zeros_str}\n\n"
+                f"Remaining Zeros (Irrational or Complex):\n{remaining_zeros_str}\n\n"
+                f"Factored Form of the Polynomial:\n{factored_form_str}"
+            )
+
+            # Display the result in a message box
+            messagebox.showinfo("Rational Zeros Result", result_message)
+
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+    elif problem_type == "Solve Inequalities":
+        try:
+            # Retrieve inputs from the GUI
+            left_expr = solve_inequalities_left_entry.get()
+            operator = inequality_operator_var.get()
+            right_value = solve_inequalities_right_entry.get()
+
+            # Input validation
+            if not left_expr:
+                raise ValueError("Please enter the left expression.")
+            if operator not in [">", "<", ">=", "<="]:
+                raise ValueError("Please select a valid inequality operator.")
+            if not right_value:
+                raise ValueError("Please enter the right value.")
+
+            # Attempt to convert right_value to a number (int or float)
+            try:
+                right_value_numeric = float(right_value)
+            except ValueError:
+                raise ValueError("Right value must be a number.")
+
+            # Solve the inequality
+            solution = solve_inequalities(left_expr, operator, right_value_numeric)
+
+            # Prepare the result message
+            result_message = (
+                f"The solution is:\n{solution}\n\n"
+                f"(Type your answer in interval notation. Simplify your answer. "
+                f"Use integers or fractions for any numbers in the expression.)"
+            )
+
+            # Display the solution
+            messagebox.showinfo("Solve Inequalities Result", result_message)
+
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+    elif problem_type == "Rational Functions":
+        try:
+            rational_str = rational_entry.get()
+            if not rational_str:
+                raise ValueError("Please enter a rational function.")
+            analysis = analyze_rational_function(rational_str)
+
+            # Prepare the result string
+            result_str = ""
+
+            # Asymptotes
+            if analysis["vertical_asymptotes"]:
+                vas = ', '.join([f"x = {va}" for va in analysis["vertical_asymptotes"]])
+                result_str += f"Vertical Asymptote(s): {vas}\n"
+            else:
+                result_str += "No Vertical Asymptotes.\n"
+
+            if analysis["horizontal_asymptote"] is not None:
+                result_str += f"Horizontal Asymptote: y = {analysis['horizontal_asymptote']}\n"
+            elif analysis["oblique_asymptote"] is not None:
+                result_str += f"Oblique Asymptote: y = {analysis['oblique_asymptote']}\n"
+            else:
+                result_str += "No Horizontal or Oblique Asymptotes.\n"
+
+            # Intercepts
+            if analysis["x_intercepts"]:
+                xis = ', '.join([f"({xi}, 0)" for xi in analysis["x_intercepts"]])
+                result_str += f"X-Intercept(s): {xis}\n"
+            else:
+                result_str += "No X-Intercepts.\n"
+
+            if analysis["y_intercept"] is not None:
+                # Convert y_intercept to a fraction string using SymPy's pretty printing
+                y_intercept_frac = sympy.nsimplify(analysis["y_intercept"], rational=True)
+                result_str += f"Y-Intercept: (0, {y_intercept_frac})\n"
+            else:
+                result_str += "Y-Intercept: Undefined (Denominator is zero at x = 0).\n"
+
+            # Holes
+            if analysis["holes"]:
+                holes_str = ""
+                for idx, hole in enumerate(analysis["holes"], start=1):
+                    x_hole, y_hole = hole
+                    if y_hole is not None:
+                        holes_str += f"Hole {idx}: ({x_hole}, {y_hole})\n"
+                    else:
+                        holes_str += f"Hole {idx}: (Undefined y-value)\n"
+                result_str += f"Hole(s):\n{holes_str}"
+            else:
+                result_str += "No Holes in the Graph.\n"
+
+            result_str += "The rational function has been graphed."
+
+            # Display the result
+            messagebox.showinfo(
+                "Rational Function Result",
+                result_str
+            )
+
+            # Plot the rational function
+            plot_rational_function(rational_str, analysis)
+        except Exception as e:
+            # Print traceback to console for debugging
+            traceback.print_exc()
+            # Show a messagebox with the error
+            messagebox.showerror("Error", f"An error occurred:\n{str(e)}")
+    elif problem_type == "Midpoint and Distance":
+        show_midpoint_distance()  # Call midpoint and distance function
+    #elif problem_type == "Circle Equation":
+        #input_type = circle_input_type_var.get()
+
+        #if input_type == "Points":
+            #show_circle_equation_from_points()  # Call function for points input
+        #elif input_type == "Equation":
+            #show_circle_equation_from_equation()  # Call function for equation input
+        #else:
+            #messagebox.showerror("Error", "Invalid input type selected.")
     else:
         messagebox.showerror(
             "Error",
@@ -2349,6 +3180,9 @@ def switch_input_type(*args):
     points_frame.pack_forget()
     parallel_perpendicular_frame.pack_forget()
     polynomial_frame.pack_forget()  # Hide the polynomial frame initially
+    #circle_frame.pack_forget()
+    #circle_points_frame.pack_forget()
+    #circle_equation_frame.pack_forget()
 
     # Show the relevant frame based on the selected input type
     choice = var.get()
@@ -2360,6 +3194,14 @@ def switch_input_type(*args):
         parallel_perpendicular_frame.pack(pady=10)
     elif choice == "Polynomials":
         polynomial_frame.pack(pady=10)
+    #elif choice == "Circle":
+        #choice = circle_input_type_var.get()
+        #if choice == "Points":
+            #circle_points_frame.pack(pady=10)
+        #elif choice == "Equation":
+            #circle_equation_frame.pack(pady=10)
+    else:
+        pass
 
 def switch_problem_type(*args):
     """Switches the visible input frames based on the selected problem type."""
@@ -2391,10 +3233,15 @@ def switch_problem_type(*args):
     trig_intervals_frame.pack_forget()
     sinusoidal_frame.pack_forget()
     synthetic_division_frame.pack_forget()
+    rational_zeros_frame.pack_forget()
+    solve_inequalities_frame.pack_forget()
+    rational_frame.pack_forget()
+    midpoint_frame.pack_forget()
+    #circle_frame.pack_forget()
 
     # Show the relevant frame based on the selected problem type
     problem_type = problem_var.get()
-    if problem_type == "Slope of a Line":
+    if problem_type == "Plot Equation":
         var.set("Equation")  # Default to "Equation" input type
         input_type_menu.pack(pady=10)
         switch_input_type()  # Show input type frame based on the dropdown
@@ -2445,6 +3292,17 @@ def switch_problem_type(*args):
         sinusoidal_frame.pack(pady=10)
     elif problem_type == "Synthetic Division":
         synthetic_division_frame.pack(pady=10)
+    elif problem_type == "Rational Zeros":
+        rational_zeros_frame.pack(pady=10)
+    elif problem_type == "Solve Inequalities":
+        solve_inequalities_frame.pack(pady=10)
+    elif problem_type == "Rational Functions":
+        rational_frame.pack(pady=10)
+    elif problem_type == "Midpoint and Distance":
+        midpoint_frame.pack(pady=10)
+    #elif problem_type == "Circle Equation":
+        #circle_frame.pack(pady=10)
+        #pass
     else:
         messagebox.showerror("Error", "Invalid problem type selected.")
 
@@ -2525,7 +3383,7 @@ problem_var = tk.StringVar(window)
 problem_var.set("Select a Math Problem")
 
 problem_type_menu = tk.OptionMenu(window, problem_var,
-                                  "Slope of a Line",
+                                  "Plot Equation",
                                   "System of Equations",
                                   "How_Many",
                                   "Absolute Value Equations",
@@ -2549,10 +3407,102 @@ problem_type_menu = tk.OptionMenu(window, problem_var,
                                   "Solve Trig Equations in Intervals",
                                   "Sinusoidal Function",
                                   "Synthetic Division",
+                                  "Rational Zeros",
+                                  "Solve Inequalities",
+                                  "Rational Functions",
+                                  "Midpoint and Distance",
+                                  #"Circle Equation",
                                   command=switch_problem_type)
 problem_type_menu.pack(pady=10)
 
-# ------------------- Synthetic Division Frame ------------------- #
+# Define the variable for the input type of the circle (Points or Equation)
+#circle_input_type_var = tk.StringVar(window)
+#circle_input_type_var.set("Points")  # Default to Points input type
+
+# Set the dropdown to trigger this function
+#circle_input_type_menu = tk.OptionMenu(window, circle_input_type_var, "Points", "Equation", command=switch_input_type)
+#circle_input_type_menu.pack(pady=10)
+
+# Frame for Points input (initially hidden)
+#circle_points_frame = tk.Frame(window)
+#tk.Label(circle_points_frame, text="Enter the center of the circle (center_x, center_y):").pack()
+#circle_center_x_entry = tk.Entry(circle_points_frame, width=10)
+#circle_center_y_entry = tk.Entry(circle_points_frame, width=10)
+#circle_center_x_entry.pack(side="left", padx=5)
+#circle_center_y_entry.pack(side="left", padx=5)
+
+#tk.Label(circle_points_frame, text="Enter a point on the circumference (point_x, point_y):").pack()
+#circle_point_x_entry = tk.Entry(circle_points_frame, width=10)
+#circle_point_y_entry = tk.Entry(circle_points_frame, width=10)
+#circle_point_x_entry.pack(side="left", padx=5)
+#circle_point_y_entry.pack(side="left", padx=5)
+
+# Frame for Equation input (initially hidden)
+#circle_equation_frame = tk.Frame(window)
+#tk.Label(circle_equation_frame, text="Enter the circle equation in standard form (e.g., (x - 3)^2 + (y + 2)^2 = 25):").pack()
+#circle_equation_entry = tk.Entry(circle_equation_frame, width=50)
+#circle_equation_entry.pack(pady=10)
+
+# Initially hide all circle-related frames
+#circle_points_frame.pack_forget()
+#circle_equation_frame.pack_forget()
+
+# Frame for Midpoint and Distance input
+midpoint_frame = tk.Frame(window)
+tk.Label(midpoint_frame, text="Enter the first point (x1, y1):").pack()
+midpoint_x1_entry = tk.Entry(midpoint_frame, width=10)
+midpoint_y1_entry = tk.Entry(midpoint_frame, width=10)
+midpoint_x1_entry.pack(side="left", padx=5)
+midpoint_y1_entry.pack(side="left", padx=5)
+
+tk.Label(midpoint_frame, text="Enter the second point (x2, y2):").pack()
+midpoint_x2_entry = tk.Entry(midpoint_frame, width=10)
+midpoint_y2_entry = tk.Entry(midpoint_frame, width=10)
+midpoint_x2_entry.pack(side="left", padx=5)
+midpoint_y2_entry.pack(side="left", padx=5)
+
+# Frame for Rational Function Analysis
+rational_frame = tk.Frame(window)
+tk.Label(rational_frame, text="Enter a rational function (e.g., 1/(x + 3)):", font=("Arial", 12)).grid(row=0, column=0, padx=5, pady=5)
+rational_entry = tk.Entry(rational_frame, width=50)
+rational_entry.grid(row=1, column=0, padx=5, pady=5)
+
+
+# 2. GUI Frame for Solve Inequalities
+solve_inequalities_frame = tk.Frame(window)
+
+# Label for the frame
+tk.Label(solve_inequalities_frame, text="Solve Inequalities", font=("Arial", 14)).grid(row=0, column=0, columnspan=2, pady=10)
+
+# Entry for Left Expression
+tk.Label(solve_inequalities_frame, text="Left Expression:").grid(row=1, column=0, padx=5, pady=5, sticky='e')
+solve_inequalities_left_entry = tk.Entry(solve_inequalities_frame, width=30)
+solve_inequalities_left_entry.grid(row=1, column=1, padx=5, pady=5)
+solve_inequalities_left_entry.insert(0, "(x-3)*(x-4)*(x-5)")
+
+# Dropdown for Operator
+tk.Label(solve_inequalities_frame, text="Operator:").grid(row=2, column=0, padx=5, pady=5, sticky='e')
+inequality_operator_var = tk.StringVar(solve_inequalities_frame)
+inequality_operator_var.set(">=")  # Default operator
+inequality_operator_menu = tk.OptionMenu(solve_inequalities_frame, inequality_operator_var, ">", "<", ">=", "<=")
+inequality_operator_menu.grid(row=2, column=1, padx=5, pady=5, sticky='w')
+
+# Entry for Right Value
+tk.Label(solve_inequalities_frame, text="Right Value:").grid(row=3, column=0, padx=5, pady=5, sticky='e')
+solve_inequalities_right_entry = tk.Entry(solve_inequalities_frame, width=30)
+solve_inequalities_right_entry.grid(row=3, column=1, padx=5, pady=5)
+solve_inequalities_right_entry.insert(0, "0")
+
+# Frame for Rational Zeros input
+rational_zeros_frame = tk.Frame(window)
+
+tk.Label(rational_zeros_frame, text="Enter the polynomial (e.g., x^5 -16x^2 +10x -29):").pack(pady=5)
+rational_zeros_entry = tk.Entry(rational_zeros_frame, width=50)
+rational_zeros_entry.pack(pady=5)
+
+
+
+# Synthetic Division Frame
 synthetic_division_frame = tk.Frame(window)
 
 tk.Label(synthetic_division_frame, text="Enter the polynomial (e.g., 2x^3 - 6x^2 + 2x -1):").pack(pady=5)
