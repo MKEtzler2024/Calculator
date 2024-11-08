@@ -5,10 +5,10 @@ import math
 import matplotlib.pyplot as plt
 import numpy as np
 from fractions import Fraction
-import sympy as sp
+import sympy
 from sympy import (
-    symbols, simplify, solve, factor, Eq, expand, Abs, Piecewise, sympify,solveset, S,
-    sin, cos, tan, csc, sec, cot, sqrt, pi, Poly, lambdify, Mod, divisors,solve_univariate_inequality,diff,limit, gcd,
+    symbols,Symbol, simplify, solve, factor, Eq,trigsimp,expand_trig, expand, Abs, Piecewise, sympify,solveset, S,
+    sin, cos, tan, csc, sec, cot,nsimplify,N ,asin, acos, atan, acsc, asec, acot, sqrt, pi, Poly, lambdify, Mod, divisors,solve_univariate_inequality,diff,limit, gcd,
 )
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
 from sympy.sets import Interval
@@ -440,6 +440,186 @@ def analyze_rational_function(function_str):
     except Exception as e:
         logging.error("Error in analyzing rational function", exc_info=True)
         raise ValueError(f"Error in analyzing rational function: {str(e)}")
+
+def adjust_angle_to_quadrant(angle, trig_func_name, quadrant):
+    """
+    Adjusts the angle to the correct quadrant based on the trig function and desired quadrant.
+    """
+    from sympy import pi
+
+    # For sine and cosine, determine the reference angle
+    reference_angle = abs(angle)
+
+    # Determine the sign of the function value in the desired quadrant
+    trig_signs = {
+        1: {'sin': '+', 'cos': '+', 'tan': '+'},
+        2: {'sin': '+', 'cos': '-', 'tan': '-'},
+        3: {'sin': '-', 'cos': '-', 'tan': '+'},
+        4: {'sin': '-', 'cos': '+', 'tan': '-'}
+    }
+
+    # Adjust angle based on quadrant
+    if quadrant == 1:
+        adjusted_angle = reference_angle
+    elif quadrant == 2:
+        if trig_func_name in ['sin', 'csc']:
+            adjusted_angle = pi - reference_angle
+        else:
+            adjusted_angle = pi - reference_angle
+    elif quadrant == 3:
+        adjusted_angle = pi + reference_angle
+    elif quadrant == 4:
+        adjusted_angle = (2 * pi) - reference_angle
+    else:
+        raise ValueError("Quadrant must be between 1 and 4.")
+
+    return adjusted_angle
+
+def compute_trig_functions(known_func_name, known_value, quadrant):
+    """
+    Computes all six trigonometric functions for an angle, given one of them
+    and the quadrant.
+    Returns a dictionary with keys 'sin', 'cos', 'tan', 'csc', 'sec', 'cot'.
+    """
+    from sympy import sqrt, simplify
+
+    # Initialize a dictionary to hold the trig values
+    trig_values = {}
+
+    # Based on the known function, compute the rest
+    if known_func_name == 'sin':
+        sin_a = known_value
+        # cos^2 a = 1 - sin^2 a
+        cos_squared = 1 - sin_a**2
+        cos_a = sqrt(cos_squared)
+        # Determine the sign of cos_a based on quadrant
+        if quadrant in [1, 4]:
+            cos_a = cos_a
+        else:
+            cos_a = -cos_a
+        trig_values['sin'] = sin_a
+        trig_values['cos'] = cos_a
+    elif known_func_name == 'cos':
+        cos_a = known_value
+        # sin^2 a = 1 - cos^2 a
+        sin_squared = 1 - cos_a**2
+        sin_a = sqrt(sin_squared)
+        # Determine the sign of sin_a based on quadrant
+        if quadrant in [1, 2]:
+            sin_a = sin_a
+        else:
+            sin_a = -sin_a
+        trig_values['cos'] = cos_a
+        trig_values['sin'] = sin_a
+    elif known_func_name == 'tan':
+        tan_a = known_value
+        # tan^2 a + 1 = sec^2 a
+        sec_squared = tan_a**2 + 1
+        sec_a = sqrt(sec_squared)
+        cos_a = 1 / sec_a
+        # Determine the sign of cos_a based on quadrant
+        if quadrant in [1, 4]:
+            cos_a = cos_a
+        else:
+            cos_a = -cos_a
+        sin_a = tan_a * cos_a
+        trig_values['tan'] = tan_a
+        trig_values['cos'] = cos_a
+        trig_values['sin'] = sin_a
+    elif known_func_name == 'csc':
+        sin_a = 1 / known_value
+        # cos^2 a = 1 - sin^2 a
+        cos_squared = 1 - sin_a**2
+        cos_a = sqrt(cos_squared)
+        # Determine the sign of cos_a based on quadrant
+        if quadrant in [1, 4]:
+            cos_a = cos_a
+        else:
+            cos_a = -cos_a
+        trig_values['sin'] = sin_a
+        trig_values['cos'] = cos_a
+    elif known_func_name == 'sec':
+        cos_a = 1 / known_value
+        # sin^2 a = 1 - cos^2 a
+        sin_squared = 1 - cos_a**2
+        sin_a = sqrt(sin_squared)
+        # Determine the sign of sin_a based on quadrant
+        if quadrant in [1, 2]:
+            sin_a = sin_a
+        else:
+            sin_a = -sin_a
+        trig_values['cos'] = cos_a
+        trig_values['sin'] = sin_a
+    elif known_func_name == 'cot':
+        cot_a = known_value
+        tan_a = 1 / cot_a
+        # tan^2 a + 1 = sec^2 a
+        sec_squared = tan_a**2 + 1
+        sec_a = sqrt(sec_squared)
+        cos_a = 1 / sec_a
+        # Determine the sign of cos_a based on quadrant
+        if quadrant in [1, 4]:
+            cos_a = cos_a
+        else:
+            cos_a = -cos_a
+        sin_a = tan_a * cos_a
+        trig_values['tan'] = tan_a
+        trig_values['cos'] = cos_a
+        trig_values['sin'] = sin_a
+    else:
+        raise ValueError("Invalid trigonometric function.")
+
+    # Now compute the rest of the functions
+    trig_values['tan'] = trig_values['sin'] / trig_values['cos']
+    trig_values['csc'] = 1 / trig_values['sin']
+    trig_values['sec'] = 1 / trig_values['cos']
+    trig_values['cot'] = trig_values['cos'] / trig_values['sin']
+
+    # Simplify all values
+    for key in trig_values:
+        trig_values[key] = simplify(trig_values[key])
+
+    return trig_values
+
+def solve_circle_radius(circle_eq, x_coord, y_coord):
+    """
+    Solves the circle equation for r given x and y coordinates.
+
+    Parameters:
+    - circle_eq: The circle equation as a SymPy Eq object.
+    - x_coord: The x-coordinate.
+    - y_coord: The y-coordinate.
+
+    Returns:
+    - The value of r.
+    """
+    from sympy import solve, symbols
+    r = symbols('r')
+
+    # Substitute x and y coordinates into the circle equation
+    eq_substituted = circle_eq.subs({'x': x_coord, 'y': y_coord})
+
+    # Solve for r
+    r_solutions = solveset(eq_substituted, r, domain=S.Reals)
+
+    # Return the positive real solution
+    for sol in r_solutions:
+        if sol.is_real and sol > 0:
+            return sol
+    raise ValueError("No valid radius found for the given point.")
+
+def parse_equation(eq_str):
+    from sympy import symbols, sympify, Eq, sqrt
+    x, y, r, a = symbols('x y r a')  # Define 'a' symbol
+    if '=' in eq_str:
+        lhs_str, rhs_str = eq_str.split('=')
+        locals_dict = {'x': x, 'y': y, 'r': r, 'sqrt': sqrt, 'a': a}
+        lhs = sympify(lhs_str.strip(), locals=locals_dict)
+        rhs = sympify(rhs_str.strip(), locals=locals_dict)
+        return Eq(lhs, rhs)
+    else:
+        raise ValueError("Invalid equation format. Please include an '=' sign.")
+
 
 # ------------------- Plotting Functions ------------------- #
 def plot_line(slope, y_intercept, x_intercept):
@@ -1024,25 +1204,22 @@ def calculate_trig_ratios_xy(x_value, y_value):
         raise ValueError(f"Error in calculating trigonometric ratios: {str(e)}")
 
 def calculate_remaining_trig_functions(known_func_name, known_value_str, quadrant_str):
-    """Calculates the remaining trig functions given one trig function value and the quadrant."""
+    """
+    Calculates the remaining trig functions given one trig function value and the quadrant,
+    including sin(2x), cos(2x), and tan(2x).
+    """
     from sympy import sin, cos, tan, csc, sec, cot, sqrt, simplify, S
+
+    # Convert input values
     known_value = S(known_value_str)  # Convert string to sympy number
     quadrant = int(quadrant_str)
 
-    # Map the function names to sympy functions
-    trig_functions = {
-        'sin': sin,
-        'cos': cos,
-        'tan': tan,
-        'csc': csc,
-        'sec': sec,
-        'cot': cot
-    }
+    # Initialize variables
+    sin_theta = cos_theta = tan_theta = None
 
-    # We need to find sin θ and cos θ first
+    # Calculate sin θ and cos θ based on the known function
     if known_func_name == 'sin':
         sin_theta = known_value
-        # Use Pythagorean identity: sin^2 θ + cos^2 θ = 1
         cos_theta_sq = 1 - sin_theta**2
         cos_theta = sqrt(cos_theta_sq)
     elif known_func_name == 'cos':
@@ -1051,12 +1228,8 @@ def calculate_remaining_trig_functions(known_func_name, known_value_str, quadran
         sin_theta = sqrt(sin_theta_sq)
     elif known_func_name == 'tan':
         tan_theta = known_value
-        # tan θ = sin θ / cos θ
-        # Use identity 1 + tan^2 θ = sec^2 θ
-        sec_theta_sq = 1 + tan_theta**2
-        sec_theta = sqrt(sec_theta_sq)
-        cos_theta = 1 / sec_theta
-        sin_theta = tan_theta * cos_theta
+        sin_theta = tan_theta / sqrt(1 + tan_theta**2)
+        cos_theta = 1 / sqrt(1 + tan_theta**2)
     elif known_func_name == 'csc':
         sin_theta = 1 / known_value
         cos_theta_sq = 1 - sin_theta**2
@@ -1067,20 +1240,13 @@ def calculate_remaining_trig_functions(known_func_name, known_value_str, quadran
         sin_theta = sqrt(sin_theta_sq)
     elif known_func_name == 'cot':
         cot_theta = known_value
-        # cot θ = cos θ / sin θ
-        # Use identity 1 + cot^2 θ = csc^2 θ
-        csc_theta_sq = 1 + cot_theta**2
-        csc_theta = sqrt(csc_theta_sq)
-        sin_theta = 1 / csc_theta
-        cos_theta = cot_theta * sin_theta
+        tan_theta = 1 / cot_theta
+        sin_theta = tan_theta / sqrt(1 + tan_theta**2)
+        cos_theta = 1 / sqrt(1 + tan_theta**2)
     else:
-        raise ValueError("Invalid trigonometric function name.")
+        raise ValueError("Invalid trigonometric function name. Must be one of 'sin', 'cos', 'tan', 'csc', 'sec', 'cot'.")
 
     # Determine the signs based on the quadrant
-    # Quadrant I: sin > 0, cos > 0
-    # Quadrant II: sin > 0, cos < 0
-    # Quadrant III: sin < 0, cos < 0
-    # Quadrant IV: sin < 0, cos > 0
     if quadrant == 1:
         sin_theta = simplify(sin_theta)
         cos_theta = simplify(cos_theta)
@@ -1096,20 +1262,40 @@ def calculate_remaining_trig_functions(known_func_name, known_value_str, quadran
     else:
         raise ValueError("Quadrant must be an integer from 1 to 4.")
 
-    # Now compute the other functions
-    tan_theta = simplify(sin_theta / cos_theta) if cos_theta != 0 else 'Undefined'
+    # Calculate tan θ if not already known
+    if tan_theta is None:
+        if cos_theta != 0:
+            tan_theta = simplify(sin_theta / cos_theta)
+        else:
+            tan_theta = 'Undefined'
+
+    # Calculate csc θ, sec θ, cot θ
     csc_theta = simplify(1 / sin_theta) if sin_theta != 0 else 'Undefined'
     sec_theta = simplify(1 / cos_theta) if cos_theta != 0 else 'Undefined'
-    cot_theta = simplify(cos_theta / sin_theta) if sin_theta != 0 else 'Undefined'
+    if sin_theta != 0:
+        cot_theta = simplify(cos_theta / sin_theta)
+    else:
+        cot_theta = 'Undefined'
+
+    # Calculate sin(2x), cos(2x), tan(2x)
+    sin_2x = simplify(2 * sin_theta * cos_theta)
+    cos_2x = simplify(cos_theta**2 - sin_theta**2)
+    if tan_theta != 'Undefined' and tan_theta != 1 and tan_theta != -1:
+        tan_2x = simplify((2 * tan_theta) / (1 - tan_theta**2))
+    else:
+        tan_2x = 'Undefined'
 
     # Build the results dictionary
     results = {
-        'sin': sin_theta,
-        'cos': cos_theta,
-        'tan': tan_theta,
-        'csc': csc_theta,
-        'sec': sec_theta,
-        'cot': cot_theta
+        'sin θ': sin_theta,
+        'cos θ': cos_theta,
+        'tan θ': tan_theta,
+        'csc θ': csc_theta,
+        'sec θ': sec_theta,
+        'cot θ': cot_theta,
+        'sin(2x)': sin_2x,
+        'cos(2x)': cos_2x,
+        'tan(2x)': tan_2x
     }
 
     return results
@@ -1601,20 +1787,21 @@ def neg_arc_function(function_name, mode, value_str):
     except Exception as e:
         return "No solution"
 
-def right_triangle(given_values):
+def solve_triangle(given_values):
     """
-    Given any two of the sides (a, b, c) or angles (A, B), computes the remaining sides and angles.
+    Given any three of the sides (a, b, c) or angles (A, B, C),
+    computes the remaining sides and angles of a triangle, handling ambiguous SSA cases.
 
     Parameters:
-    - given_values: dictionary with two keys and their values, e.g., {'a': 3, 'b': 4}
+    - given_values: dictionary with keys among 'a', 'b', 'c', 'A', 'B', 'C'
 
     Returns:
-    - Dictionary with all sides and angles
+    - List of dictionaries with all sides and angles for each possible solution
     """
     import math
 
     # Initialize variables
-    a = b = c = A = B = None
+    a = b = c = A = B = C = None
 
     # Extract given values
     for key, value in given_values.items():
@@ -1628,85 +1815,150 @@ def right_triangle(given_values):
             A = float(value)
         elif key == 'B':
             B = float(value)
+        elif key == 'C':
+            C = float(value)
         else:
             raise ValueError("Invalid key in given_values")
 
-    # Since C = 90 degrees
-    C = 90.0
+    # Count the number of known sides and angles
+    known_sides = [x for x in [a, b, c] if x is not None]
+    known_angles = [x for x in [A, B, C] if x is not None]
 
-    # Compute missing angles if one is given
-    if A is not None and B is None:
-        B = 90.0 - A
-    elif B is not None and A is None:
-        A = 90.0 - B
-    elif A is not None and B is not None:
-        # Validate that A + B = 90 degrees
-        if abs(A + B - 90.0) > 1e-6:
-            raise ValueError("Angles A and B must add up to 90 degrees in a right triangle")
+    num_known_sides = len(known_sides)
+    num_known_angles = len(known_angles)
 
-    # Compute sides and angles based on given information
-    if a is not None and b is not None:
-        # Given sides a and b
-        c = math.hypot(a, b)
-        A = math.degrees(math.atan2(a, b))
-        B = 90.0 - A
-    elif a is not None and c is not None:
-        # Given sides a and c
-        if c <= a:
-            raise ValueError("Hypotenuse c must be greater than side a")
-        b = math.sqrt(c**2 - a**2)
-        A = math.degrees(math.asin(a / c))
-        B = 90.0 - A
-    elif b is not None and c is not None:
-        # Given sides b and c
-        if c <= b:
-            raise ValueError("Hypotenuse c must be greater than side b")
-        a = math.sqrt(c**2 - b**2)
-        B = math.degrees(math.asin(b / c))
-        A = 90.0 - B
-    elif a is not None and A is not None:
-        # Given side a and angle A
-        c = a / math.sin(math.radians(A))
-        b = math.sqrt(c**2 - a**2)
-        B = 90.0 - A
-    elif b is not None and B is not None:
-        # Given side b and angle B
-        c = b / math.sin(math.radians(B))
-        a = math.sqrt(c**2 - b**2)
-        A = 90.0 - B
-    elif a is not None and B is not None:
-        # Given side a and angle B
-        c = a / math.cos(math.radians(B))
-        b = math.sqrt(c**2 - a**2)
-        A = 90.0 - B
-    elif b is not None and A is not None:
-        # Given side b and angle A
-        c = b / math.cos(math.radians(A))
-        a = math.sqrt(c**2 - b**2)
-        B = 90.0 - A
-    elif c is not None and A is not None:
-        # Given hypotenuse c and angle A
-        a = c * math.sin(math.radians(A))
-        b = c * math.cos(math.radians(A))
-        B = 90.0 - A
-    elif c is not None and B is not None:
-        # Given hypotenuse c and angle B
-        b = c * math.sin(math.radians(B))
-        a = c * math.cos(math.radians(B))
-        A = 90.0 - B
+    # Need at least 3 known values, including at least one side
+    if num_known_sides + num_known_angles < 3:
+        raise ValueError("At least three known values are required, including at least one side.")
+
+    solutions = []
+
+    # Handle various cases
+    if num_known_sides == 3:
+        # SSS case
+        # Use Law of Cosines to find angles
+        A_calc = math.degrees(math.acos((b**2 + c**2 - a**2)/(2*b*c)))
+        B_calc = math.degrees(math.acos((a**2 + c**2 - b**2)/(2*a*c)))
+        C_calc = 180.0 - A_calc - B_calc
+        solutions.append({'a': a, 'b': b, 'c': c, 'A': A_calc, 'B': B_calc, 'C': C_calc})
+    elif num_known_angles == 3:
+        # AAA case - cannot solve sides with only angles
+        raise ValueError("Cannot solve triangle with only angles.")
+    elif num_known_angles == 2 and num_known_sides == 1:
+        # AAS or ASA case
+        # First, find the third angle
+        if A is None:
+            A = 180.0 - B - C
+        elif B is None:
+            B = 180.0 - A - C
+        elif C is None:
+            C = 180.0 - A - B
+
+        # Find the known side and its opposite angle
+        if a is not None and A is not None:
+            known_side = a
+            known_angle = A
+        elif b is not None and B is not None:
+            known_side = b
+            known_angle = B
+        elif c is not None and C is not None:
+            known_side = c
+            known_angle = C
+        else:
+            raise ValueError("Need at least one known side and its opposite angle.")
+
+        # Use Law of Sines to find the other sides
+        if a is None:
+            a = known_side * math.sin(math.radians(A)) / math.sin(math.radians(known_angle))
+        if b is None:
+            b = known_side * math.sin(math.radians(B)) / math.sin(math.radians(known_angle))
+        if c is None:
+            c = known_side * math.sin(math.radians(C)) / math.sin(math.radians(known_angle))
+
+        solutions.append({'a': a, 'b': b, 'c': c, 'A': A, 'B': B, 'C': C})
+    elif num_known_sides == 2 and num_known_angles == 1:
+        # SAS or SSA cases
+        if A is not None and a is not None and b is not None:
+            # SSA case
+            sinB = b * math.sin(math.radians(A)) / a
+            if sinB > 1 or sinB < -1:
+                # No solution
+                return []
+            elif abs(sinB - 1) < 1e-6 or abs(sinB + 1) < 1e-6:
+                # One solution
+                B_calc = math.degrees(math.asin(sinB))
+                C_calc = 180.0 - A - B_calc
+                c_calc = a * math.sin(math.radians(C_calc)) / math.sin(math.radians(A))
+                solutions.append({'a': a, 'b': b, 'c': c_calc, 'A': A, 'B': B_calc, 'C': C_calc})
+            else:
+                # Two solutions
+                B1 = math.degrees(math.asin(sinB))
+                B2 = 180.0 - B1
+
+                # First possible triangle
+                C1 = 180.0 - A - B1
+                if C1 > 0:
+                    c1 = a * math.sin(math.radians(C1)) / math.sin(math.radians(A))
+                    solutions.append({'a': a, 'b': b, 'c': c1, 'A': A, 'B': B1, 'C': C1})
+
+                # Second possible triangle
+                C2 = 180.0 - A - B2
+                if C2 > 0:
+                    c2 = a * math.sin(math.radians(C2)) / math.sin(math.radians(A))
+                    solutions.append({'a': a, 'b': b, 'c': c2, 'A': A, 'B': B2, 'C': C2})
+        elif B is not None and a is not None and b is not None:
+            # SSA case
+            sinA = a * math.sin(math.radians(B)) / b
+            if sinA > 1 or sinA < -1:
+                # No solution
+                return []
+            elif abs(sinA - 1) < 1e-6 or abs(sinA + 1) < 1e-6:
+                # One solution
+                A_calc = math.degrees(math.asin(sinA))
+                C_calc = 180.0 - A_calc - B
+                c_calc = a * math.sin(math.radians(C_calc)) / math.sin(math.radians(A_calc))
+                solutions.append({'a': a, 'b': b, 'c': c_calc, 'A': A_calc, 'B': B, 'C': C_calc})
+            else:
+                # Two solutions
+                A1 = math.degrees(math.asin(sinA))
+                A2 = 180.0 - A1
+
+                # First possible triangle
+                C1 = 180.0 - A1 - B
+                if C1 > 0:
+                    c1 = a * math.sin(math.radians(C1)) / math.sin(math.radians(A1))
+                    solutions.append({'a': a, 'b': b, 'c': c1, 'A': A1, 'B': B, 'C': C1})
+
+                # Second possible triangle
+                C2 = 180.0 - A2 - B
+                if C2 > 0:
+                    c2 = a * math.sin(math.radians(C2)) / math.sin(math.radians(A2))
+                    solutions.append({'a': a, 'b': b, 'c': c2, 'A': A2, 'B': B, 'C': C2})
+        elif A is not None and b is not None and c is not None:
+            # SAS case
+            a = math.sqrt(b**2 + c**2 - 2*b*c*math.cos(math.radians(A)))
+            B = math.degrees(math.acos((a**2 + b**2 - c**2)/(2*a*b)))
+            C = 180.0 - A - B
+            solutions.append({'a': a, 'b': b, 'c': c, 'A': A, 'B': B, 'C': C})
+        elif B is not None and a is not None and c is not None:
+            # SAS case
+            b = math.sqrt(a**2 + c**2 - 2*a*c*math.cos(math.radians(B)))
+            A = math.degrees(math.acos((a**2 + b**2 - c**2)/(2*a*b)))
+            C = 180.0 - A - B
+            solutions.append({'a': a, 'b': b, 'c': c, 'A': A, 'B': B, 'C': C})
+        elif C is not None and a is not None and b is not None:
+            # SAS case
+            c = math.sqrt(a**2 + b**2 - 2*a*b*math.cos(math.radians(C)))
+            A = math.degrees(math.acos((b**2 + c**2 - a**2)/(2*b*c)))
+            B = 180.0 - A - C
+            solutions.append({'a': a, 'b': b, 'c': c, 'A': A, 'B': B, 'C': C})
+        else:
+            # Need more information
+            raise ValueError("Insufficient or invalid data to solve the triangle")
     else:
-        raise ValueError("Insufficient or invalid data to solve the triangle")
+        raise ValueError("Cannot solve the triangle with the given information.")
 
-    # Build result dictionary
-    result = {
-        'a': a,
-        'b': b,
-        'c': c,
-        'A': A,
-        'B': B,
-        'C': C
-    }
-    return result
+    return solutions
 
 def solve_trig_intervals(equation_str, interval_unit):
     """
@@ -2111,7 +2363,7 @@ def Midpoint(x1, y1, x2, y2):
     mid_y = (y1 + y2) / 2
 
     # Calculate distance using symbolic sqrt (no simplification)
-    distance = sp.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
+    distance = sympy.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2)
 
     return (mid_x, mid_y), distance
 
@@ -2140,7 +2392,7 @@ def Circle_Equation_from_points(center_x, center_y, point_x, point_y):
     point_x, point_y = Fraction(point_x), Fraction(point_y)
 
     # Calculate the radius (distance between center and point on circumference)
-    radius = sp.sqrt((point_x - center_x) ** 2 + (point_y - center_y) ** 2)
+    radius = sympy.sqrt((point_x - center_x) ** 2 + (point_y - center_y) ** 2)
 
     # The equation of the circle in standard form: (x - h)^2 + (y - k)^2 = r^2
     h, k = center_x, center_y
@@ -2165,7 +2417,7 @@ def Circle_Equation_from_equation(equation):
         h = float(match.group(1))
         k = float(match.group(2))
         r_squared = float(match.group(3))
-        radius = sp.sqrt(r_squared)
+        radius = sympy.sqrt(r_squared)
 
         center = (h, k)
         return center, radius
@@ -2207,6 +2459,653 @@ def show_circle_equation_from_equation():
                             f"Radius: {radius}")
     except ValueError as e:
         messagebox.showerror("Invalid Input", str(e))
+
+def calculate_two_trig_functions(trig_func1_name, value1_str, quadrant1_str,
+                                 trig_func2_name, value2_str, quadrant2_str,
+                                 operation, target_trig_func_name, angle_unit):
+    """
+    Calculates trig_target(a ± b) given trig_func1(a) = value1 in quadrant1,
+    and trig_func2(b) = value2 in quadrant2.
+
+    Returns the result as a simplified fraction or radical.
+    """
+    from sympy import sin, cos, tan, simplify, S, sqrt
+
+    # Convert input values to SymPy expressions
+    value1 = S(value1_str)
+    value2 = S(value2_str)
+    quadrant1 = int(quadrant1_str)
+    quadrant2 = int(quadrant2_str)
+
+    # Map function names to trigonometric functions
+    trig_functions = {
+        'sin': sin,
+        'cos': cos,
+        'tan': tan,
+        'csc': lambda theta: 1 / sin(theta),
+        'sec': lambda theta: 1 / cos(theta),
+        'cot': lambda theta: 1 / tan(theta)
+    }
+
+    # Validate function names
+    if trig_func1_name not in trig_functions or trig_func2_name not in trig_functions:
+        raise ValueError("Invalid trigonometric function selected.")
+    if target_trig_func_name not in ['sin', 'cos', 'tan']:
+        raise ValueError("Invalid target trigonometric function selected.")
+    if operation not in ['+', '-']:
+        raise ValueError("Invalid operation selected.")
+    if quadrant1 not in [1, 2, 3, 4] or quadrant2 not in [1, 2, 3, 4]:
+        raise ValueError("Quadrants must be between 1 and 4.")
+
+    # Compute all trig functions for angle a
+    trig_values_a = compute_trig_functions(trig_func1_name, value1, quadrant1)
+    # Compute all trig functions for angle b
+    trig_values_b = compute_trig_functions(trig_func2_name, value2, quadrant2)
+
+    # Now compute trig_target(a ± b)
+    if target_trig_func_name == 'sin':
+        if operation == '+':
+            result = trig_values_a['sin'] * trig_values_b['cos'] + trig_values_a['cos'] * trig_values_b['sin']
+        else:
+            result = trig_values_a['sin'] * trig_values_b['cos'] - trig_values_a['cos'] * trig_values_b['sin']
+    elif target_trig_func_name == 'cos':
+        if operation == '+':
+            result = trig_values_a['cos'] * trig_values_b['cos'] - trig_values_a['sin'] * trig_values_b['sin']
+        else:
+            result = trig_values_a['cos'] * trig_values_b['cos'] + trig_values_a['sin'] * trig_values_b['sin']
+    elif target_trig_func_name == 'tan':
+        if operation == '+':
+            numerator = trig_values_a['tan'] + trig_values_b['tan']
+            denominator = 1 - trig_values_a['tan'] * trig_values_b['tan']
+            if denominator == 0:
+                raise ValueError("Result is undefined (division by zero).")
+            result = numerator / denominator
+        else:
+            numerator = trig_values_a['tan'] - trig_values_b['tan']
+            denominator = 1 + trig_values_a['tan'] * trig_values_b['tan']
+            if denominator == 0:
+                raise ValueError("Result is undefined (division by zero).")
+            result = numerator / denominator
+    else:
+        raise ValueError("Invalid target trigonometric function.")
+
+    # Simplify the result
+    result = simplify(result)
+
+    return result
+
+def solve_trig_identity(expr_str, angle_unit):
+    """
+    Simplifies a trigonometric expression and computes its exact value.
+
+    Parameters:
+    - expr_str (str): The trigonometric expression as a string.
+    - angle_unit (str): "Degrees" or "Radians" indicating the unit of the angle.
+
+    Returns:
+    - sympy expression: The simplified exact value of the expression.
+    """
+    from sympy import sympify, pi, rad, degree, sin, cos, tan, csc, sec, cot, simplify, N
+
+    # Replace '^' with '**' for exponentiation
+    expr_str = expr_str.replace('^', '**')
+
+    # Define symbols and functions
+    x = symbols('x')
+
+    # Handle degrees if necessary
+    if angle_unit == "Degrees":
+        # Replace degree symbol if present
+        expr_str = expr_str.replace('°', '')
+        # Replace known functions to ensure degrees are converted to radians
+        expr_str = expr_str.replace('sin', 'sin_deg')
+        expr_str = expr_str.replace('cos', 'cos_deg')
+        expr_str = expr_str.replace('tan', 'tan_deg')
+        expr_str = expr_str.replace('csc', 'csc_deg')
+        expr_str = expr_str.replace('sec', 'sec_deg')
+        expr_str = expr_str.replace('cot', 'cot_deg')
+
+        # Define degree versions of the functions
+        def sin_deg(angle):
+            return sin(rad(angle))
+
+        def cos_deg(angle):
+            return cos(rad(angle))
+
+        def tan_deg(angle):
+            return tan(rad(angle))
+
+        def csc_deg(angle):
+            return csc(rad(angle))
+
+        def sec_deg(angle):
+            return sec(rad(angle))
+
+        def cot_deg(angle):
+            return cot(rad(angle))
+
+        locals_dict = {
+            'pi': pi,
+            'x': x,
+            'sin_deg': sin_deg,
+            'cos_deg': cos_deg,
+            'tan_deg': tan_deg,
+            'csc_deg': csc_deg,
+            'sec_deg': sec_deg,
+            'cot_deg': cot_deg,
+            'rad': rad,
+            'degree': degree,
+        }
+    else:
+        # For radians
+        locals_dict = {
+            'pi': pi,
+            'x': x,
+            'sin': sin,
+            'cos': cos,
+            'tan': tan,
+            'csc': csc,
+            'sec': sec,
+            'cot': cot,
+        }
+
+    # Parse the expression
+    try:
+        expr = sympify(expr_str, locals=locals_dict)
+    except Exception as e:
+        raise ValueError(f"Invalid expression: {e}")
+
+    # Simplify the expression
+    simplified_expr = simplify(expr)
+
+    # Evaluate the expression numerically if it doesn't simplify further
+    if simplified_expr.is_number:
+        exact_value = simplified_expr
+    else:
+        # Try to evaluate numerically with higher precision
+        exact_value = N(simplified_expr, 15)
+
+    return exact_value
+
+def solve_double_half_angle_equation(equation_str, variable_str, interval_start_str, interval_end_str):
+    from sympy import symbols, sympify, sin, cos, tan, sec, csc, cot, solveset, S, pi, simplify, Eq, Interval, sqrt
+    import re
+
+    # Define the variable
+    x = symbols(variable_str)
+
+    # Prepare the locals dictionary
+    locals_dict = {
+        'x': x,
+        'pi': pi,
+        'sin': sin,
+        'cos': cos,
+        'tan': tan,
+        'sec': sec,
+        'csc': csc,
+        'cot': cot,
+        'sqrt': sqrt  # Include sqrt in locals
+    }
+
+    # Replace '^' with '**' for exponentiation
+    equation_str = equation_str.replace('^', '**')
+
+    # Regex pattern to match trigonometric functions
+    pattern = r'(?P<func>sin|cos|tan|sec|csc|cot)(\*\*(?P<power>\d+))?\s*(\((?P<arg>[^)]+)\)|(?P<arg_no_paren>[^\s=+*/^-]+))'
+
+    # Replacement function
+    def replace_trig_powers(match):
+        func = match.group('func')
+        power = match.group('power') if match.group('power') else '1'
+        arg = match.group('arg') if match.group('arg') else match.group('arg_no_paren')
+        return f"({func}({arg}))**{power}"
+
+    # Apply the regex substitution
+    equation_str = re.sub(pattern, replace_trig_powers, equation_str)
+
+    # Now split the equation at '='
+    if '=' in equation_str:
+        lhs_str, rhs_str = equation_str.split('=')
+        # Parse lhs and rhs
+        lhs = sympify(lhs_str, locals=locals_dict)
+        rhs = sympify(rhs_str, locals=locals_dict)
+        # Create an equation
+        equation = Eq(lhs, rhs)
+    else:
+        equation = sympify(equation_str, locals=locals_dict)
+
+    # Parse the interval limits
+    interval_start = sympify(interval_start_str, locals=locals_dict)
+    interval_end = sympify(interval_end_str, locals=locals_dict)
+
+    # Solve the equation within the interval
+    domain = S.Reals.intersect(Interval(interval_start, interval_end))
+    solutions = solveset(equation, x, domain=domain)
+
+    # Simplify and sort solutions
+    solutions = [simplify(sol) for sol in solutions if sol.is_real]
+    solutions = sorted(solutions, key=lambda s: float(s.evalf()))
+
+    return solutions
+
+def evaluate_function_at_expression(fx_str, expr_str, x_coord_str, y_coord_str, circle_eq_str, quadrant):
+    from sympy import symbols, sympify, sin, cos, tan, sqrt, pi, simplify, Eq, solveset, S
+    import sympy
+
+    # Define symbols
+    x, y, theta, r = symbols('x y theta r')
+    a = symbols('a')  # Define 'a' symbol if needed
+
+    # Parse the function f(x)
+    fx = sympify(fx_str, locals={'sin': sin, 'cos': cos, 'tan': tan, 'theta': theta, 'pi': pi, 'sqrt': sqrt})
+
+    # Parse the x and y coordinates
+    x_coord = sympify(x_coord_str, locals={'sqrt': sqrt, 'a': a})
+    y_coord = sympify(y_coord_str, locals={'sqrt': sqrt, 'a': a})
+
+    # Parse the circle equation
+    circle_eq = parse_equation(circle_eq_str)
+
+    # Solve for x if necessary
+    if x_coord.has(a):
+        # Substitute y into the circle equation and solve for x
+        subs_eq = circle_eq.subs({'y': y_coord})
+        solutions = solveset(subs_eq, x_coord)
+
+        # Select the appropriate solution based on the quadrant
+        possible_x_values = [sol for sol in solutions if sol.is_real]
+        if not possible_x_values:
+            raise ValueError("No real solutions for x.")
+
+        if quadrant == 'II':
+            x_coord_values = [sol for sol in possible_x_values if sol.evalf() < 0]
+        else:
+            x_coord_values = possible_x_values
+
+        if not x_coord_values:
+            raise ValueError(f"No valid x-coordinate found in Quadrant {quadrant}.")
+        x_coord = x_coord_values[0]
+
+    # Compute r (radius)
+    r_value = sqrt(x_coord**2 + y_coord**2)
+
+    # Compute sin(θ) and cos(θ)
+    sin_theta = y_coord / r_value
+    cos_theta = x_coord / r_value
+
+    # Substitute sin(θ) and cos(θ) into f(expression)
+    # For expression involving 2*theta, use trigonometric identities
+    if expr_str == '2*theta':
+        # For sin(2θ)
+        f_expr_value = fx.subs(theta, expr_str)
+        # Use double-angle identity
+        sin_2theta = 2 * sin_theta * cos_theta
+        f_expr_value = simplify(sin_2theta)
+    elif expr_str == 'theta':
+        f_expr_value = fx.subs(theta, sympy.atan2(y_coord, x_coord))
+        f_expr_value = simplify(f_expr_value)
+    else:
+        # For other expressions, evaluate numerically
+        theta_value = sympy.atan2(y_coord.evalf(), x_coord.evalf())
+        expr_value = sympify(expr_str, locals={'theta': theta_value, 'pi': pi, 'sqrt': sqrt})
+        f_expr_value = fx.subs(theta, expr_value).evalf()
+
+    return f_expr_value
+
+def populate_trig_cheat_sheet():
+    """Populates the trig cheat sheet frame with content."""
+    # Clear the frame first
+    for widget in notes_frame.winfo_children():
+        widget.destroy()
+
+    cheat_sheet_text = """
+Basic Trigonometric Identities
+
+Reciprocal Identities:
+csc θ = 1 / sin θ
+sec θ = 1 / cos θ
+cot θ = 1 / tan θ
+
+Pythagorean Identities:
+sin² θ + cos² θ = 1
+1 + tan² θ = sec² θ
+1 + cot² θ = csc² θ
+
+Quotient Identities:
+tan θ = sin θ / cos θ
+cot θ = cos θ / sin θ
+
+Co-Function Identities:
+sin(90° - θ) = cos θ
+cos(90° - θ) = sin θ
+tan(90° - θ) = cot θ
+cot(90° - θ) = tan θ
+sec(90° - θ) = csc θ
+csc(90° - θ) = sec θ
+
+**Double Angle Formulas:**
+sin(2A) = 2 sin A cos A
+
+cos(2A) = cos² A - sin² A
+(Expressed in terms of sin A and cos A)
+
+cos(2A) = 2 cos² A - 1
+(Expressed in terms of cos A only)
+
+cos(2A) = 1 - 2 sin² A
+(Expressed in terms of sin A only)
+
+tan(2A) = (2 tan A) / (1 - tan² A)
+
+Sum and Difference Formulas:
+sin(α ± β) = sin α cos β ± cos α sin β
+cos(α ± β) = cos α cos β ∓ sin α sin β
+tan(α ± β) = (tan α ± tan β) / (1 ∓ tan α tan β)
+
+Half-Angle Formulas:
+sin² θ = (1 - cos 2θ) / 2
+cos² θ = (1 + cos 2θ) / 2
+tan² θ = (1 - cos 2θ) / (1 + cos 2θ)
+
+Product-to-Sum Formulas:
+sin α sin β = [cos(α - β) - cos(α + β)] / 2
+cos α cos β = [cos(α - β) + cos(α + β)] / 2
+sin α cos β = [sin(α + β) + sin(α - β)] / 2
+
+Sum-to-Product Formulas:
+sin α + sin β = 2 sin[(α + β)/2] cos[(α - β)/2]
+sin α - sin β = 2 cos[(α + β)/2] sin[(α - β)/2]
+cos α + cos β = 2 cos[(α + β)/2] cos[(α - β)/2]
+cos α - cos β = -2 sin[(α + β)/2] sin[(α - β)/2]
+
+Law of Sines:
+(a / sin A) = (b / sin B) = (c / sin C)
+
+Law of Cosines:
+c² = a² + b² - 2ab cos C
+
+"""
+
+    # Create a text widget with a scrollbar
+    text_frame = tk.Frame(notes_frame)
+    text_frame.pack(expand=True, fill='both')
+
+    scrollbar = tk.Scrollbar(text_frame)
+    scrollbar.pack(side='right', fill='y')
+
+    text_widget = tk.Text(text_frame, wrap='word', yscrollcommand=scrollbar.set, width=80, height=25)
+    text_widget.pack(side='left', expand=True, fill='both')
+
+    scrollbar.config(command=text_widget.yview)
+
+    # Define text tags for formatting
+    text_widget.tag_configure('title', font=('Arial', 16, 'bold'))
+    text_widget.tag_configure('heading', font=('Arial', 14, 'bold'), foreground='blue')
+    text_widget.tag_configure('formula', font=('Arial', 12))
+    text_widget.tag_configure('space', font=('Arial', 4))
+
+    # Insert and format the text
+    sections = cheat_sheet_text.strip().split('\n\n')
+    for section in sections:
+        lines = section.strip().split('\n')
+        heading = lines[0]
+        formulas = lines[1:]
+
+        if heading.strip():
+            text_widget.insert(tk.END, f'{heading}\n', 'heading')
+        for formula in formulas:
+            if formula.strip():
+                text_widget.insert(tk.END, f'{formula}\n', 'formula')
+        text_widget.insert(tk.END, '\n', 'space')
+
+    # Make the text widget read-only
+    text_widget.config(state='disabled')
+
+def solve_trig_equation(func_name, value_str, unit="Radians"):
+    """
+    Solves a trigonometric equation of the form func(kx) = value.
+
+    Parameters:
+    - func_name: A string, one of 'sin', 'cos', 'tan', 'sin(2x)', 'cos(2x)', 'tan(2x)'.
+    - value_str: A string representing the value (e.g., 'sqrt(2)/2').
+    - unit: 'Degrees' or 'Radians'.
+
+    Returns:
+    - A dictionary containing:
+        - 'general_solution': General solution based on the selected function.
+        - 'specific_solutions': A list of specific solutions for n = 0, 1, 2.
+        - 'unit': The unit of the solutions ('Degrees' or 'Radians').
+    """
+    from sympy import symbols, Eq, sin, cos, tan, pi, asin, acos, atan, S, simplify, solve
+
+    x = symbols('x')
+    n = symbols('n', integer=True)
+    value = S(value_str)  # Convert string to sympy expression
+
+    # Determine the multiple of x based on the function name
+    if func_name in ['sin', 'cos', 'tan']:
+        multiple = 1
+        base_func = {'sin': sin, 'cos': cos, 'tan': tan}[func_name]
+    elif func_name == 'sin(2x)':
+        multiple = 2
+        base_func = sin
+    elif func_name == 'cos(2x)':
+        multiple = 2
+        base_func = cos
+    elif func_name == 'tan(2x)':
+        multiple = 2
+        base_func = tan
+    else:
+        raise ValueError("Invalid function name. Must be 'sin', 'cos', 'tan', 'sin(2x)', 'cos(2x)', or 'tan(2x)'.")
+
+    # Find the principal value
+    if base_func == sin:
+        if value < -1 or value > 1:
+            raise ValueError(f"The value {value} is out of range for sin.")
+        principal_value = asin(value)
+        base_period = 2 * pi
+        # General solution: multiple * x = principal_value + 2π * n  OR  multiple * x = (π - principal_value) + 2π * n
+        general_eq1 = multiple * x - principal_value - 2 * pi * n
+        general_eq2 = multiple * x - (pi - principal_value) - 2 * pi * n
+        general_solution_eqs = [Eq(general_eq1, 0), Eq(general_eq2, 0)]
+    elif base_func == cos:
+        if value < -1 or value > 1:
+            raise ValueError(f"The value {value} is out of range for cos.")
+        principal_value = acos(value)
+        base_period = 2 * pi
+        # General solution: multiple * x = ±principal_value + 2π * n
+        general_eq1 = multiple * x - principal_value - 2 * pi * n
+        general_eq2 = multiple * x + principal_value - 2 * pi * n
+        general_solution_eqs = [Eq(general_eq1, 0), Eq(general_eq2, 0)]
+    elif base_func == tan:
+        principal_value = atan(value)
+        base_period = pi
+        # General solution: multiple * x = principal_value + π * n
+        general_eq = multiple * x - principal_value - pi * n
+        general_solution_eqs = [Eq(general_eq, 0)]
+
+    # Adjust units
+    if unit == "Degrees":
+        # Convert all angle measures to degrees
+        degree_factor = 180 / pi
+        principal_value = principal_value * degree_factor  # Convert to degrees
+        base_period = base_period * degree_factor
+        # Multiply both sides of each equation by degree_factor
+        general_solution_eqs = [Eq(eq.lhs * degree_factor, eq.rhs * degree_factor) for eq in general_solution_eqs]
+        # Simplify principal value
+        principal_value = simplify(principal_value)
+    else:
+        # Simplify principal value
+        principal_value = simplify(principal_value)
+
+    # Solve for x
+    x_solutions = []
+    for eq in general_solution_eqs:
+        sol = solve(eq, x)[0]
+        x_solutions.append(sol)
+
+    # Prepare general solution string
+    gen_sol_str = "General solutions:\n"
+    for sol in x_solutions:
+        gen_sol_str += f"x = {simplify(sol)}\n"
+
+    # Calculate specific solutions for n = 0, 1, 2
+    specific_solutions = []
+    for n_value in [0, 1, 2]:
+        for sol in x_solutions:
+            x_val = sol.subs(n, n_value)
+            if unit == "Degrees":
+                x_val = x_val % 360  # Adjust to [0°, 360°)
+            else:
+                x_val = x_val % (2 * pi)  # Adjust to [0, 2π)
+            specific_solutions.append(simplify(x_val))
+
+    # Remove duplicates and sort
+    specific_solutions = list(set(specific_solutions))
+    specific_solutions.sort(key=lambda expr: expr.evalf())
+
+    results = {
+        'general_solution': gen_sol_str,
+        'specific_solutions': specific_solutions,
+        'unit': unit
+    }
+
+    return results
+
+def coordinate_conversion(coordinate_type, inputs, angle_unit="Radians"):
+    """
+    Converts between polar and rectangular coordinates, graphs the point,
+    and provides simplified values for r and θ.
+
+    Parameters:
+    - coordinate_type: 'Polar' or 'Rectangular'.
+    - inputs: Dictionary containing the coordinate inputs.
+    - angle_unit: 'Degrees' or 'Radians'.
+
+    Returns:
+    - A dictionary containing:
+        - 'result_str': String with the conversion results.
+        - 'plot_filename': The filename of the saved plot.
+    """
+    import matplotlib.pyplot as plt
+    from sympy import symbols, pi, simplify, N, cos, sin, atan2, sqrt, S, nsimplify, Rational
+
+    # Prepare the result string
+    result_str = ""
+
+    if coordinate_type == "Polar":
+        # Extract inputs
+        r = S(inputs['r'])
+        theta_input = S(inputs['theta'])
+
+        # Use the angle unit as provided in the input
+        if angle_unit == "Degrees":
+            theta = theta_input % 360
+            theta_rad = simplify(theta * pi / 180)
+        else:
+            theta = theta_input % (2 * pi)
+            theta_rad = theta
+
+        # Calculate rectangular coordinates
+        x = r * cos(theta_rad)
+        y = r * sin(theta_rad)
+
+        # Simplify x and y
+        x = simplify(x)
+        y = simplify(y)
+
+        result_str += f"Polar Coordinates: (r = {r}, θ = {theta_input} {angle_unit})\n\n"
+        result_str += f"Rectangular Coordinates:\n x = {x}\n y = {y}\n\n"
+
+        # For plotting
+        x_num = float(N(x))
+        y_num = float(N(y))
+        r_num = float(N(r))
+        theta_rad_num = float(N(theta_rad))
+
+        # Prepare plot filename
+        plot_filename = "polar_plot.png"
+
+        # Graph the point
+        plt.figure()
+        ax = plt.subplot(111, projection='polar')
+        ax.plot(theta_rad_num, abs(r_num), 'ro')  # Use absolute value for radius
+        ax.set_rmax(abs(r_num) + 1)
+        ax.set_title("Polar Coordinate Plot")
+        plt.savefig(plot_filename)
+        plt.close()
+
+    else:
+        # Rectangular to Polar
+        # Extract inputs
+        x = S(inputs['x'])
+        y = S(inputs['y'])
+
+        # Calculate radius and angle
+        r_exact = sqrt(x**2 + y**2)
+        theta_rad = atan2(y, x) % (2 * pi)
+
+        # Simplify radius
+        r_simplified = simplify(r_exact)
+
+        # Check if r_simplified is an integer or rational number
+        if r_simplified.is_rational or r_simplified.is_Integer:
+            r = r_simplified
+        else:
+            # Provide numerical approximation
+            r = N(r_exact)
+            # Round to two decimal places
+            r = round(float(r), 2)
+
+        # Compute theta_fraction = theta_rad / pi
+        theta_fraction = N(theta_rad / pi)
+
+        # Attempt to approximate theta_fraction as a rational number
+        max_denominator = 12  # Limit denominator to avoid messy fractions
+        theta_fraction_rational = Rational(theta_fraction).limit_denominator(max_denominator)
+
+        # Check the approximation error
+        approximation_error = abs(theta_fraction - float(theta_fraction_rational))
+
+        if approximation_error < 1e-3:
+            # Use the rational approximation
+            theta = simplify(theta_fraction_rational) * pi
+            angle_unit_str = ""
+        else:
+            # If approximation is not acceptable, provide decimal multiple of pi
+            theta = N(theta_rad)
+            theta = round(float(theta), 4)  # Round to 4 decimal places for better readability
+            angle_unit_str = ""
+
+        result_str += f"Rectangular Coordinates: (x = {x}, y = {y})\n\n"
+        if angle_unit == "Radians":
+            result_str += f"Polar Coordinates:\n r = {r}\n θ = {theta}{angle_unit_str}\n\n"
+        else:
+            # Convert theta to degrees
+            theta_deg = N(theta_rad * 180 / pi)
+            theta_deg = round(float(theta_deg), 2)  # Round to 2 decimal places
+            result_str += f"Polar Coordinates:\n r = {r}\n θ = {theta_deg}°\n\n"
+
+        # For plotting
+        x_num = float(N(x))
+        y_num = float(N(y))
+
+        # Prepare plot filename
+        plot_filename = "rectangular_plot.png"
+
+        # Graph the point
+        plt.figure()
+        plt.plot([0, x_num], [0, y_num], 'ro')
+        plt.xlim([min(0, x_num) - 1, max(0, x_num) + 1])
+        plt.ylim([min(0, y_num) - 1, max(0, y_num) + 1])
+        plt.grid(True)
+        plt.title("Rectangular Coordinate Plot")
+        plt.xlabel('x')
+        plt.ylabel('y')
+        plt.savefig(plot_filename)
+        plt.close()
+
+    return {'result_str': result_str, 'plot_filename': plot_filename}
 
 # ------------------- Function Operations ------------------- #
 def apply_function_operations(f_expr, g_expr):
@@ -2383,7 +3282,7 @@ def show_result(choice, **kwargs):
                 raise ValueError("Please enter both the polynomial and the divisor.")
 
             # Perform synthetic division
-            quotient, remainder = synthetic_division(polynomial, divisor)
+            quotient, remainder = divide_polynomials(polynomial, divisor)
 
             # Display the result
             messagebox.showinfo(
@@ -2513,8 +3412,8 @@ def on_submit():
                             f"Solutions (roots): {solutions_str}\n\n"
                             f"Domain: {quadratic_analysis['domain']}\n"
                             f"Range: {quadratic_analysis['range']}\n\n"
-                            f"Intervals of Increase: {quadratic_analysis['increasing_interval']}\n"
-                            f"Intervals of Decrease: {quadratic_analysis['decreasing_interval']}\n\n"
+                            f"Intervals of Increase: {quadratic_analysis['increasing_intervals']}\n"
+                            f"Intervals of Decrease: {quadratic_analysis['decreasing_intervals']}\n"
                             f"Concavity: {quadratic_analysis['concavity']}\n"
                             f"Axis of Symmetry: {quadratic_analysis['axis_of_symmetry']}\n"
                             f"Vertex: ({quadratic_analysis['vertex'][0]}, {quadratic_analysis['vertex'][1]})\n"
@@ -2771,12 +3670,15 @@ def on_submit():
             results = calculate_remaining_trig_functions(known_func, known_value, quadrant)
             result_str = (
                 f"Given {known_func}(θ) = {known_value}, θ in Quadrant {quadrant}\n\n"
-                f"sin(θ) = {results['sin']}\n"
-                f"cos(θ) = {results['cos']}\n"
-                f"tan(θ) = {results['tan']}\n"
-                f"csc(θ) = {results['csc']}\n"
-                f"sec(θ) = {results['sec']}\n"
-                f"cot(θ) = {results['cot']}\n"
+                f"sin(θ) = {results['sin θ']}\n"
+                f"cos(θ) = {results['cos θ']}\n"
+                f"tan(θ) = {results['tan θ']}\n"
+                f"csc(θ) = {results['csc θ']}\n"
+                f"sec(θ) = {results['sec θ']}\n"
+                f"cot(θ) = {results['cot θ']}\n\n"
+                f"sin(2θ) = {results['sin(2x)']}\n"
+                f"cos(2θ) = {results['cos(2x)']}\n"
+                f"tan(2θ) = {results['tan(2x)']}\n"
                 "\n(Simplify your answer, including any radicals. Use integers or fractions for any numbers in the expression.)"
             )
             messagebox.showinfo("Trig Functions Result", result_str)
@@ -2891,38 +3793,74 @@ def on_submit():
                 messagebox.showinfo("NegArc Result", message)
         except Exception as e:
             messagebox.showerror("Error", str(e))
-    elif problem_type == "Right Triangle":
+    elif problem_type == "Triangle Solver":
         try:
             # Collect known values
             selected_vars = {var_name: var.get() for var_name, var in known_vars.items()}
             num_selected = sum(selected_vars.values())
 
-            if num_selected != 2:
-                raise ValueError("Please select exactly two known values.")
+            if num_selected < 3:
+                raise ValueError("Please select at least three known values, including at least one side.")
 
             given_values = {}
+            num_known_sides = 0
             for var_name, is_selected in selected_vars.items():
                 if is_selected:
                     value_str = entries[var_name].get()
                     if not value_str:
                         raise ValueError(f"Please enter a value for {var_name}.")
                     given_values[var_name] = float(value_str)
+                    if var_name in ['a', 'b', 'c']:
+                        num_known_sides += 1
 
-            # Call the right_triangle function
-            result = right_triangle(given_values)
+            if num_known_sides == 0:
+                raise ValueError("At least one side must be known.")
 
-            # Format the result for display
-            result_str = (
-                f"a = {result['a']}\n"
-                f"b = {result['b']}\n"
-                f"c = {result['c']}\n"
-                f"A = {result['A']} degrees\n"
-                f"B = {result['B']} degrees\n"
-                f"C = {result['C']} degrees\n"
-            )
-            messagebox.showinfo("Right Triangle Result", result_str)
+            # Call the updated solve_triangle function
+            solutions = solve_triangle(given_values)
+
+            if not solutions:
+                messagebox.showinfo("Triangle Solver Result", "There are no possible solutions for the triangle.")
+            elif len(solutions) == 1:
+                sol = solutions[0]
+                result_str = (
+                    f"There is only 1 possible solution for the triangle.\n\n"
+                    f"A = {sol['A']} degrees\n"
+                    f"B = {sol['B']} degrees\n"
+                    f"C = {sol['C']} degrees\n"
+                    f"a = {sol['a']}\n"
+                    f"b = {sol['b']}\n"
+                    f"c = {sol['c']}\n"
+                )
+                messagebox.showinfo("Triangle Solver Result", result_str)
+            elif len(solutions) == 2:
+                # Identify which solution has the longer side c
+                if solutions[0]['c'] > solutions[1]['c']:
+                    longer_sol = solutions[0]
+                    shorter_sol = solutions[1]
+                else:
+                    longer_sol = solutions[1]
+                    shorter_sol = solutions[0]
+
+                result_str = (
+                    f"There are 2 possible solutions for the triangle.\n\n"
+                    f"The measurements for the solution with the longer side c are as follows:\n"
+                    f"B = {longer_sol['B']} degrees\n"
+                    f"C = {longer_sol['C']} degrees\n"
+                    f"c = {longer_sol['c']}\n\n"
+                    f"The measurements for the solution with the shorter side c are as follows:\n"
+                    f"B = {shorter_sol['B']} degrees\n"
+                    f"C = {shorter_sol['C']} degrees\n"
+                    f"c = {shorter_sol['c']}\n"
+                )
+                messagebox.showinfo("Triangle Solver Result", result_str)
+            else:
+                messagebox.showerror("Error", "Unexpected number of solutions.")
         except Exception as e:
             messagebox.showerror("Error", str(e))
+
+
+
     elif problem_type == "Solve Trig Equations in Intervals":
         try:
             equation_str = trig_intervals_equation_entry.get()
@@ -3167,6 +4105,170 @@ def on_submit():
             #show_circle_equation_from_equation()  # Call function for equation input
         #else:
             #messagebox.showerror("Error", "Invalid input type selected.")
+    elif problem_type == "Two Trig Functions":
+        try:
+            trig_func1_name = two_trig_func1_var.get()
+            value1_str = two_trig_value1_entry.get()
+            quadrant1_str = two_trig_quadrant1_entry.get()
+
+            trig_func2_name = two_trig_func2_var.get()
+            value2_str = two_trig_value2_entry.get()
+            quadrant2_str = two_trig_quadrant2_entry.get()
+
+            operation = two_trig_op_var.get()
+            target_trig_func_name = two_trig_target_func_var.get()
+            angle_unit = two_trig_unit_var.get()
+
+            if not (trig_func1_name and value1_str and quadrant1_str and
+                    trig_func2_name and value2_str and quadrant2_str and
+                    operation and target_trig_func_name and angle_unit):
+                raise ValueError("Please enter all required fields.")
+
+            result = calculate_two_trig_functions(
+                trig_func1_name, value1_str, quadrant1_str,
+                trig_func2_name, value2_str, quadrant2_str,
+                operation, target_trig_func_name, angle_unit
+            )
+            # Convert result to a string using SymPy's pretty printing for exact values
+            result_str = sympy.pretty(result)
+            messagebox.showinfo(
+                "Two Trig Functions Result",
+                f"The value of {target_trig_func_name}(a {operation} b) is:\n{result_str}"
+            )
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    elif problem_type == "Solve Trig Functions":
+        try:
+            expr_str = solve_trig_expr_entry.get()
+            angle_unit = angle_unit_var.get()  # Get the selected angle unit
+            if not expr_str:
+                raise ValueError("Please enter a trigonometric expression.")
+
+            result = solve_trig_identity(expr_str, angle_unit)
+
+            # Convert result to a string using SymPy's pretty printing
+            result_str = sympy.pretty(result)
+
+            messagebox.showinfo(
+                "Solve Trig Functions Result",
+                f"The exact value of the expression is:\n{result_str}"
+            )
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    elif problem_type == "Solve Double and Half Angle Equations":
+        try:
+            equation_str = double_half_angle_eq_entry.get()
+            variable_str = double_half_angle_var.get()
+            interval_start_str = double_half_angle_interval_start.get()
+            interval_end_str = double_half_angle_interval_end.get()
+
+            if not equation_str:
+                raise ValueError("Please enter a trigonometric equation.")
+
+            # Solve the equation
+            solutions = solve_double_half_angle_equation(
+                equation_str, variable_str, interval_start_str, interval_end_str
+            )
+
+            if not solutions:
+                result_str = "No solutions found in the specified interval."
+            else:
+                # Format the solutions for display
+                solutions_str = ', '.join([str(sol) for sol in solutions])
+                result_str = f"Solutions in the interval [{interval_start_str}, {interval_end_str}):\n{solutions_str}"
+
+            messagebox.showinfo("Double and Half Angle Equation Result", result_str)
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+    elif problem_type == "Evaluate Function at Expression":
+        try:
+            fx_str = eval_fx_entry.get()
+            expr_str = eval_expr_entry.get()
+            x_coord_str = eval_x_entry.get()
+            y_coord_str = eval_y_entry.get()
+            circle_eq_str = eval_circle_eq_entry.get()
+            quadrant = eval_quadrant_entry.get()  # Add an entry for quadrant
+
+            if not (fx_str and expr_str and x_coord_str and y_coord_str and quadrant):
+                raise ValueError("Please enter all required fields.")
+
+            result = evaluate_function_at_expression(fx_str, expr_str, x_coord_str, y_coord_str, circle_eq_str, quadrant)
+
+            messagebox.showinfo(
+                "Evaluate Function at Expression Result",
+                f"The value of f({expr_str}) is:\n{result}"
+            )
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+
+    elif problem_type == "Solve Trig Equations":
+        try:
+            func_name = solve_trig_func_var.get()
+            value_str = solve_trig_value_entry.get()
+            unit = solve_trig_unit_var.get()  # Get the selected unit
+
+            if not func_name or not value_str:
+                raise ValueError("Please enter all required fields.")
+
+            # Call the solve_trig_equation function with the selected unit
+            results = solve_trig_equation(func_name, value_str, unit)
+
+            general_solution = results['general_solution']
+            specific_solutions = results['specific_solutions']
+            unit = results['unit']
+
+            unit_symbol = "°" if unit == "Degrees" else " radians"
+
+            # Prepare the result string
+            result_str = f"Solving the equation: {func_name} = {value_str}\n\n"
+            result_str += general_solution + "\n"
+
+            # List specific solutions for n = 0, 1, 2
+            result_str += "Specific solutions for n = 0, 1, 2:\n"
+            solutions_str = ', '.join(f"{sol}{unit_symbol}" for sol in specific_solutions)
+            result_str += f"x = {solutions_str}"
+
+            messagebox.showinfo("Trig Equation Solution", result_str)
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
+    elif problem_type == "Coordinate Conversion":
+        try:
+            coordinate_type = coordinate_type_var.get()
+            if coordinate_type == "Polar":
+                angle_unit = polar_angle_unit_var.get()
+                radius_str = polar_radius_entry.get()
+                angle_str = polar_angle_entry.get()
+                if not radius_str or not angle_str:
+                    raise ValueError("Please enter both radius and angle for polar coordinates.")
+
+                inputs = {'r': radius_str, 'theta': angle_str}
+            else:
+                angle_unit = rectangular_angle_unit_var.get()
+                x_str = rectangular_x_entry.get()
+                y_str = rectangular_y_entry.get()
+                if not x_str or not y_str:
+                    raise ValueError("Please enter both x and y coordinates.")
+                inputs = {'x': x_str, 'y': y_str}
+
+            # Call the coordinate_conversion function
+            results = coordinate_conversion(coordinate_type, inputs, angle_unit)
+            result_str = results['result_str']
+            plot_filename = results['plot_filename']
+
+            # Display the results
+            messagebox.showinfo("Coordinate Conversion", result_str)
+
+            # Display the plot
+            plot_window = tk.Toplevel(window)
+            plot_window.title("Coordinate Plot")
+            img = tk.PhotoImage(file=plot_filename)
+            img_label = tk.Label(plot_window, image=img)
+            img_label.image = img  # Keep a reference
+            img_label.pack()
+        except Exception as e:
+            messagebox.showerror("Error", str(e))
     else:
         messagebox.showerror(
             "Error",
@@ -3229,7 +4331,7 @@ def switch_problem_type(*args):
     solution_equation_frame.pack_forget()
     quadratic_frame.pack_forget()
     neg_arc_frame.pack_forget()
-    right_triangle_frame.pack_forget()
+    triangle_frame.pack_forget()
     trig_intervals_frame.pack_forget()
     sinusoidal_frame.pack_forget()
     synthetic_division_frame.pack_forget()
@@ -3238,6 +4340,14 @@ def switch_problem_type(*args):
     rational_frame.pack_forget()
     midpoint_frame.pack_forget()
     #circle_frame.pack_forget()
+    two_trig_frame.pack_forget()
+    solve_trig_frame.pack_forget()
+    double_half_angle_frame.pack_forget()
+    eval_function_frame.pack_forget()
+    notes_frame.pack_forget()
+    solve_trig_equation_frame.pack_forget()
+    coordinate_conversion_frame.pack_forget()
+
 
     # Show the relevant frame based on the selected problem type
     problem_type = problem_var.get()
@@ -3284,8 +4394,8 @@ def switch_problem_type(*args):
         quadratic_frame.pack(pady=10)
     elif problem_type == "NegArc":
         neg_arc_frame.pack(pady=10)
-    elif problem_type == "Right Triangle":
-        right_triangle_frame.pack(pady=10)
+    elif problem_type == "Triangle Solver":
+        triangle_frame.pack(pady=10)
     elif problem_type == "Solve Trig Equations in Intervals":
         trig_intervals_frame.pack(pady=10)
     elif problem_type == "Sinusoidal Function":
@@ -3303,6 +4413,21 @@ def switch_problem_type(*args):
     #elif problem_type == "Circle Equation":
         #circle_frame.pack(pady=10)
         #pass
+    elif problem_type == "Two Trig Functions":
+        two_trig_frame.pack(pady=10)
+    elif problem_type == "Solve Trig Functions":
+        solve_trig_frame.pack(pady=10)
+    elif problem_type == "Solve Double and Half Angle Equations":
+        double_half_angle_frame.pack(pady=10)
+    elif problem_type == "Evaluate Function at Expression":
+        eval_function_frame.pack(pady=10)
+    elif problem_type == "Notes":
+        notes_frame.pack(pady=10)
+        populate_trig_cheat_sheet()
+    elif problem_type == "Solve Trig Equations":
+        solve_trig_equation_frame.pack(pady=10)
+    elif problem_type == "Coordinate Conversion":
+        coordinate_conversion_frame.pack(pady=10)
     else:
         messagebox.showerror("Error", "Invalid problem type selected.")
 
@@ -3372,13 +4497,29 @@ def switch_piecewise_mode(*args):
         x_value_label.pack_forget()
         piecewise_x_entry.pack_forget()
 
+def update_coordinate_input_fields():
+    """Shows or hides input fields based on coordinate type selection."""
+    if coordinate_type_var.get() == "Polar":
+        rectangular_input_frame.pack_forget()
+        polar_input_frame.pack()
+        rectangular_angle_unit_menu.pack_forget()
+        # Angle unit selection for polar input is already packed within polar_input_frame
+    else:
+        polar_input_frame.pack_forget()
+        rectangular_input_frame.pack()
+        # Pack the angle unit selection for rectangular to polar conversion
+        tk.Label(rectangular_input_frame, text="Select the unit for the angle θ:").pack()
+        rectangular_angle_unit_menu.pack()
+
+
+
 # ------------------- GUI Setup ------------------- #
 # Creating the main window
 window = tk.Tk()
 window.title("Math Function Solver")
 window.geometry("500x700")
 
-# Dropdown for choosing the math problem type
+# Dropdown for choosing the math problem types
 problem_var = tk.StringVar(window)
 problem_var.set("Select a Math Problem")
 
@@ -3403,7 +4544,7 @@ problem_type_menu = tk.OptionMenu(window, problem_var,
                                   "Solution Set of Equations",
                                   "Solve Quadratics",
                                   "NegArc",
-                                  "Right Triangle",
+                                  "Triangle Solver",
                                   "Solve Trig Equations in Intervals",
                                   "Sinusoidal Function",
                                   "Synthetic Division",
@@ -3412,8 +4553,244 @@ problem_type_menu = tk.OptionMenu(window, problem_var,
                                   "Rational Functions",
                                   "Midpoint and Distance",
                                   #"Circle Equation",
+                                  "Two Trig Functions",
+                                  "Solve Trig Functions",
+                                  "Solve Double and Half Angle Equations",
+                                  "Evaluate Function at Expression",
+                                  "Notes",
+                                  "Solve Trig Equations",
+                                  "Coordinate Conversion",
                                   command=switch_problem_type)
 problem_type_menu.pack(pady=10)
+
+
+
+# Frame for Coordinate Conversion
+coordinate_conversion_frame = tk.Frame(window)
+
+# Coordinate Type Selection
+coordinate_type_var = tk.StringVar(window)
+coordinate_type_var.set("Polar")  # Default to 'Polar'
+
+tk.Label(coordinate_conversion_frame, text="Select the coordinate type you are providing:").pack()
+coordinate_type_polar = tk.Radiobutton(
+    coordinate_conversion_frame, text="Polar Coordinates", variable=coordinate_type_var, value="Polar", command=update_coordinate_input_fields)
+coordinate_type_rectangular = tk.Radiobutton(
+    coordinate_conversion_frame, text="Rectangular Coordinates", variable=coordinate_type_var, value="Rectangular", command=update_coordinate_input_fields)
+coordinate_type_polar.pack()
+coordinate_type_rectangular.pack()
+
+# Polar Coordinate Inputs
+polar_input_frame = tk.Frame(coordinate_conversion_frame)
+tk.Label(polar_input_frame, text="Enter the radius (r):").pack()
+polar_radius_entry = tk.Entry(polar_input_frame, width=20)
+polar_radius_entry.pack()
+
+tk.Label(polar_input_frame, text="Enter the angle (θ):").pack()
+polar_angle_entry = tk.Entry(polar_input_frame, width=20)
+polar_angle_entry.pack()
+
+# Angle Unit Selection for Polar Coordinates
+tk.Label(polar_input_frame, text="Select the unit for the angle θ:").pack()
+polar_angle_unit_var = tk.StringVar(window)
+polar_angle_unit_var.set("Degrees")  # Default to 'Degrees'
+polar_angle_unit_menu = tk.OptionMenu(polar_input_frame, polar_angle_unit_var, "Degrees", "Radians")
+polar_angle_unit_menu.pack()
+
+# Rectangular Coordinate Inputs
+rectangular_input_frame = tk.Frame(coordinate_conversion_frame)
+tk.Label(rectangular_input_frame, text="Enter the x-coordinate:").pack()
+rectangular_x_entry = tk.Entry(rectangular_input_frame, width=20)
+rectangular_x_entry.pack()
+
+tk.Label(rectangular_input_frame, text="Enter the y-coordinate:").pack()
+rectangular_y_entry = tk.Entry(rectangular_input_frame, width=20)
+rectangular_y_entry.pack()
+
+# Angle Unit Selection for Rectangular Coordinates
+tk.Label(rectangular_input_frame, text="Select the unit for the angle θ:").pack()
+rectangular_angle_unit_var = tk.StringVar(window)
+rectangular_angle_unit_var.set("Degrees")  # Default to 'Degrees'
+rectangular_angle_unit_menu = tk.OptionMenu(rectangular_input_frame, rectangular_angle_unit_var, "Degrees", "Radians")
+rectangular_angle_unit_menu.pack()
+
+
+
+# Frame for Solve Trig Equations
+solve_trig_equation_frame = tk.Frame(window)
+
+# Function Selection
+tk.Label(solve_trig_equation_frame, text="Select the trigonometric function:").pack()
+solve_trig_func_var = tk.StringVar(window)
+solve_trig_func_var.set("cos")  # Default to 'cos'
+solve_trig_func_menu = tk.OptionMenu(
+    solve_trig_equation_frame,
+    solve_trig_func_var,
+    "sin",
+    "cos",
+    "tan",
+    "sin(2x)",
+    "cos(2x)",
+    "tan(2x)"
+)
+solve_trig_func_menu.pack()
+
+# Value Entry
+tk.Label(solve_trig_equation_frame, text="Enter the value (e.g., sqrt(2)/2):").pack()
+solve_trig_value_entry = tk.Entry(solve_trig_equation_frame, width=30)
+solve_trig_value_entry.pack()
+
+# Unit Selection
+tk.Label(solve_trig_equation_frame, text="Select the unit for the solutions:").pack()
+solve_trig_unit_var = tk.StringVar(window)
+solve_trig_unit_var.set("Radians")  # Default to 'Radians'
+solve_trig_unit_menu = tk.OptionMenu(solve_trig_equation_frame, solve_trig_unit_var, "Degrees", "Radians")
+solve_trig_unit_menu.pack()
+
+# Create the frame for the Trig Cheat Sheet
+notes_frame = tk.Frame(window)
+
+
+# Frame for Evaluate Function at Expression
+eval_function_frame = tk.Frame(window)
+
+# Label and Entry for the function f(x)
+tk.Label(eval_function_frame, text="Enter the function f(x):").pack()
+eval_fx_entry = tk.Entry(eval_function_frame, width=30)
+eval_fx_entry.insert(0, "sin(x)")  # Default to sin(x)
+eval_fx_entry.pack()
+
+# Label and Entry for the expression to evaluate
+tk.Label(eval_function_frame, text="Enter the expression for the function's argument (e.g., '2x'):")
+eval_expr_entry = tk.Entry(eval_function_frame, width=30)
+eval_expr_entry.insert(0, "2x")  # Default to 2x
+eval_expr_entry.pack()
+
+# Instructions
+tk.Label(eval_function_frame, text="Enter the coordinates of the point on the circle:").pack()
+
+# Entries for x-coordinate
+tk.Label(eval_function_frame, text="x-coordinate (a):").pack()
+eval_x_entry = tk.Entry(eval_function_frame, width=10)
+eval_x_entry.pack()
+
+# Entries for y-coordinate
+tk.Label(eval_function_frame, text="y-coordinate (b):").pack()
+eval_y_entry = tk.Entry(eval_function_frame, width=10)
+eval_y_entry.pack()
+
+# Entry for the circle equation (optional, default is x^2 + y^2 = r^2)
+tk.Label(eval_function_frame, text="Circle equation (optional, default is x^2 + y^2 = r^2):").pack()
+eval_circle_eq_entry = tk.Entry(eval_function_frame, width=30)
+eval_circle_eq_entry.insert(0, "x**2 + y**2 = r**2")
+eval_circle_eq_entry.pack()
+
+
+
+
+# Frame for Solve Double and Half Angle Equations input
+double_half_angle_frame = tk.Frame(window)
+
+# Label and Entry for the equation
+tk.Label(double_half_angle_frame, text="Enter the trigonometric equation to solve (e.g., cos(2x) + 10*sin(x)^2 = 7):").pack()
+double_half_angle_eq_entry = tk.Entry(double_half_angle_frame, width=50)
+double_half_angle_eq_entry.pack()
+
+# Label and Entry for the variable (use 'x' instead of 'theta')
+tk.Label(double_half_angle_frame, text="Variable (default is 'x'):")
+# We'll set 'x' as default and hide this entry since we are using 'x'
+double_half_angle_var = tk.StringVar(value='x')
+# Hidden Entry (not displayed)
+# double_half_angle_var_entry = tk.Entry(double_half_angle_frame, width=10, textvariable=double_half_angle_var)
+# double_half_angle_var_entry.pack()
+
+# Label and Entries for the interval
+tk.Label(double_half_angle_frame, text="Enter the interval for x (in radians):").pack()
+interval_frame = tk.Frame(double_half_angle_frame)
+interval_frame.pack()
+
+tk.Label(interval_frame, text="From:").pack(side=tk.LEFT)
+double_half_angle_interval_start = tk.Entry(interval_frame, width=10)
+double_half_angle_interval_start.insert(0, "0")  # Default start of interval
+double_half_angle_interval_start.pack(side=tk.LEFT)
+
+tk.Label(interval_frame, text="To:").pack(side=tk.LEFT)
+double_half_angle_interval_end = tk.Entry(interval_frame, width=10)
+double_half_angle_interval_end.insert(0, "2*pi")  # Default end of interval
+double_half_angle_interval_end.pack(side=tk.LEFT)
+
+# Frame for Solve Trig Functions input
+solve_trig_frame = tk.Frame(window)
+
+tk.Label(solve_trig_frame, text="Enter the trigonometric expression to evaluate (e.g., sin(pi/2) or sin(90°)):").pack()
+solve_trig_expr_entry = tk.Entry(solve_trig_frame, width=40)
+solve_trig_expr_entry.pack()
+
+# Angle unit selection
+angle_unit_var = tk.StringVar(value="Radians")
+tk.Label(solve_trig_frame, text="Select angle unit:").pack()
+tk.Radiobutton(solve_trig_frame, text="Degrees", variable=angle_unit_var, value="Degrees").pack()
+tk.Radiobutton(solve_trig_frame, text="Radians", variable=angle_unit_var, value="Radians").pack()
+
+
+# Frame for Two Trig Functions input
+two_trig_frame = tk.Frame(window)
+
+# Entry for quadrant of angle a
+tk.Label(two_trig_frame, text="Enter the quadrant for angle a (1-4):").pack()
+two_trig_quadrant1_entry = tk.Entry(two_trig_frame, width=5)
+two_trig_quadrant1_entry.pack()
+
+# Entry for quadrant of angle b
+tk.Label(two_trig_frame, text="Enter the quadrant for angle b (1-4):").pack()
+two_trig_quadrant2_entry = tk.Entry(two_trig_frame, width=5)
+two_trig_quadrant2_entry.pack()
+
+# Dropdown to select the first trigonometric function (trig_func1_name)
+tk.Label(two_trig_frame, text="Select the first trigonometric function (trig_func1):").pack()
+two_trig_func1_var = tk.StringVar(window)
+two_trig_func1_var.set("sin")  # Default to 'sin'
+two_trig_func1_menu = tk.OptionMenu(two_trig_frame, two_trig_func1_var, "sin", "cos", "tan", "csc", "sec", "cot")
+two_trig_func1_menu.pack()
+
+# Entry for trig_func1(a) = value1
+tk.Label(two_trig_frame, text="Enter the value of trig_func1(a):").pack()
+two_trig_value1_entry = tk.Entry(two_trig_frame, width=30)
+two_trig_value1_entry.pack()
+
+# Dropdown to select the second trigonometric function (trig_func2_name)
+tk.Label(two_trig_frame, text="Select the second trigonometric function (trig_func2):").pack()
+two_trig_func2_var = tk.StringVar(window)
+two_trig_func2_var.set("cos")  # Default to 'cos'
+two_trig_func2_menu = tk.OptionMenu(two_trig_frame, two_trig_func2_var, "sin", "cos", "tan", "csc", "sec", "cot")
+two_trig_func2_menu.pack()
+
+# Entry for trig_func2(b) = value2
+tk.Label(two_trig_frame, text="Enter the value of trig_func2(b):").pack()
+two_trig_value2_entry = tk.Entry(two_trig_frame, width=30)
+two_trig_value2_entry.pack()
+
+# Dropdown to select operation
+tk.Label(two_trig_frame, text="Select the operation between angles a and b:").pack()
+two_trig_op_var = tk.StringVar(window)
+two_trig_op_var.set("+")  # Default to '+'
+two_trig_op_menu = tk.OptionMenu(two_trig_frame, two_trig_op_var, "+", "-")
+two_trig_op_menu.pack()
+
+# Dropdown to select the target trigonometric function (trig_target)
+tk.Label(two_trig_frame, text="Select the target trigonometric function:").pack()
+two_trig_target_func_var = tk.StringVar(window)
+two_trig_target_func_var.set("sin")  # Default to 'sin'
+two_trig_target_func_menu = tk.OptionMenu(two_trig_frame, two_trig_target_func_var, "sin", "cos", "tan")
+two_trig_target_func_menu.pack()
+
+# Option to select angle unit
+tk.Label(two_trig_frame, text="Select the angle unit:").pack()
+two_trig_unit_var = tk.StringVar(window)
+two_trig_unit_var.set("Radians")  # Default to 'Radians'
+two_trig_unit_menu = tk.OptionMenu(two_trig_frame, two_trig_unit_var, "Radians", "Degrees")
+two_trig_unit_menu.pack()
+
 
 # Define the variable for the input type of the circle (Points or Equation)
 #circle_input_type_var = tk.StringVar(window)
@@ -3551,29 +4928,27 @@ trig_intervals_unit_menu.pack()
 
 
 
-# Frame for Right Triangle input
-right_triangle_frame = tk.Frame(window)
+# Frame for Triangle input
+triangle_frame = tk.Frame(window)
 
 # Instructions
-tk.Label(right_triangle_frame, text="Select any two known values and enter their values.").pack()
+tk.Label(triangle_frame, text="Select at least three known values (including at least one side) and enter their values.").pack()
 
 # Variables for checkboxes
 known_vars = {'a': tk.IntVar(), 'b': tk.IntVar(), 'c': tk.IntVar(),
-              'A': tk.IntVar(), 'B': tk.IntVar()}
+              'A': tk.IntVar(), 'B': tk.IntVar(), 'C': tk.IntVar()}
 
 # Create checkboxes and entries
 entries = {}
 
-for var_name in ['a', 'b', 'c', 'A', 'B']:
-    frame = tk.Frame(right_triangle_frame)
+for var_name in ['a', 'b', 'c', 'A', 'B', 'C']:
+    frame = tk.Frame(triangle_frame)
     var_check = tk.Checkbutton(frame, text=f"{var_name}", variable=known_vars[var_name])
     var_check.pack(side="left")
     entry = tk.Entry(frame, width=10)
     entries[var_name] = entry
     entry.pack(side="left")
     frame.pack(anchor="w")
-
-tk.Label(right_triangle_frame, text="(Note: Angle C is always 90 degrees)").pack()
 
 
 # Frame for NegArc input
