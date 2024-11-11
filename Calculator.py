@@ -6,8 +6,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from fractions import Fraction
 import sympy
+from sympy.polys.polyerrors import PolynomialError
 from sympy import (
-    symbols,Symbol, simplify, solve, factor, Eq,trigsimp,expand_trig, expand, Abs, Piecewise, sympify,solveset, S,
+    symbols,Symbol, simplify, solve, factor, Eq,trigsimp,Union,expand_trig, expand, Abs, Piecewise, sympify,solveset, S,
     sin, cos, tan, csc, sec, cot,nsimplify,N ,asin, acos, atan, acsc, asec, acot, sqrt, pi, Poly, lambdify, Mod, divisors,solve_univariate_inequality,diff,limit, gcd,
 )
 from sympy.parsing.sympy_parser import parse_expr, standard_transformations, implicit_multiplication_application
@@ -351,90 +352,77 @@ def analyze_rational_function(function_str):
     - dict containing asymptotes, intercepts, and holes
     """
     try:
-        # Validate parentheses
-        if not is_parentheses_balanced(function_str):
-            raise ValueError("Unbalanced parentheses detected in the expression.")
+        # Replace ^ with ** for exponentiation
+        function_str = function_str.replace("^", "**")
 
-        # Enable implicit multiplication (allows inputs like 'x/(x(x+8))')
+        # Enable implicit multiplication for parsing
         transformations = standard_transformations + (implicit_multiplication_application,)
         expr = parse_expr(function_str, transformations=transformations)
 
+        # Ensure the function is a valid expression
         if not isinstance(expr, sympy.Expr):
             raise ValueError("The input is not a valid expression.")
 
-        # Ensure the function is rational: expression is a ratio of polynomials
+        # Split the expression into numerator and denominator
         numerator, denominator = expr.as_numer_denom()
 
-        # Attempt to create Poly objects to verify if they are polynomials
-        try:
-            poly_num = Poly(numerator, x)
-            poly_den = Poly(denominator, x)
-        except PolynomialError:
-            raise ValueError("The function is not a rational function (ratio of polynomials).")
+        # Verify that both numerator and denominator are polynomials
+        poly_num = Poly(numerator, x)
+        poly_den = Poly(denominator, x)
 
-        # Factor numerator and denominator
-        numerator_factors = sympy.factor_list(numerator)[1]
-        denominator_factors = sympy.factor_list(denominator)[1]
-
-        # Find GCD of numerator and denominator to identify holes
+        # Find GCD of numerator and denominator to detect holes
         gcd_expr = sympy.gcd(numerator, denominator)
-
-        # Holes: solutions to gcd_expr = 0
         holes = solveset(gcd_expr, x, domain=S.Reals)
-        hole_xs = [float(sol.evalf()) for sol in holes]
+        hole_xs = [float(sol.evalf()) for sol in holes if sol.is_real]
 
-        # Vertical Asymptotes: zeros of denominator not canceled by numerator
-        vertical_asymptotes_set = solveset(denominator, x, domain=S.Reals) - solveset(gcd_expr, x, domain=S.Reals)
-        vertical_asymptotes = [float(sol.evalf()) for sol in vertical_asymptotes_set]
+        # Vertical Asymptotes (zeros of denominator not canceled by numerator)
+        vertical_asymptotes_set = solveset(denominator, x, domain=S.Reals) - holes
+        vertical_asymptotes = [float(sol.evalf()) for sol in vertical_asymptotes_set if sol.is_real]
 
-        # Horizontal or Oblique Asymptotes
+        # Degree of numerator and denominator to determine horizontal/oblique asymptotes
         deg_num = sympy.degree(numerator, gen=x)
         deg_den = sympy.degree(denominator, gen=x)
 
+        horizontal_asymptote = None
+        oblique_asymptote = None
+
         if deg_num < deg_den:
             horizontal_asymptote = limit(expr, x, sympy.oo)
-            horizontal_asymptote_exists = True
-            oblique_asymptote = None
         elif deg_num == deg_den:
             horizontal_asymptote = limit(expr, x, sympy.oo)
-            horizontal_asymptote_exists = True
-            oblique_asymptote = None
         else:
-            # Oblique asymptote exists
-            quotient, remainder = sympy.div(numerator, denominator, domain='EX')
+            # Oblique asymptote for deg_num > deg_den
+            quotient, _ = sympy.div(numerator, denominator)
             oblique_asymptote = quotient
-            horizontal_asymptote_exists = False
-            horizontal_asymptote = None
 
-        # X-Intercepts: zeros of numerator, excluding holes
-        x_intercepts_set = solveset(numerator, x, domain=S.Reals) - solveset(gcd_expr, x, domain=S.Reals)
-        x_intercepts = [float(sol.evalf()) for sol in x_intercepts_set]
+        # X-Intercepts: solutions to numerator = 0 (excluding holes)
+        try:
+            x_intercepts_set = solveset(numerator, x, domain=S.Reals) - holes
+            x_intercepts = [float(sol.evalf()) for sol in x_intercepts_set if sol.is_real and sol.is_number]
+        except TypeError:
+            # Fallback to solve if solveset cannot produce a finite set
+            x_intercepts = [float(sol.evalf()) for sol in solve(numerator, x) if sol.is_real]
 
-        # Y-Intercept: f(0) if denominator doesn't equal zero
-        if denominator.subs(x, 0) != 0:
-            y_intercept = expr.subs(x, 0)
-            y_intercept_val = float(y_intercept.evalf())
-        else:
-            y_intercept = None  # Undefined
-            y_intercept_val = None
+        # Y-Intercept: f(0) if denominator is non-zero at x = 0
+        y_intercept = expr.subs(x, 0).evalf() if denominator.subs(x, 0) != 0 else None
 
-        # Holes points: (a, limit expr as x approaches a)
+        # Hole points (a, limit of f(x) as x approaches a)
         hole_points = []
         for a in hole_xs:
             y = limit(expr, x, a)
-            if y.is_real:
-                hole_points.append( (a, float(y.evalf())) )
-            else:
-                hole_points.append( (a, None) )
+            hole_points.append((a, float(y.evalf())) if y.is_real else (a, None))
 
         return {
             "vertical_asymptotes": vertical_asymptotes,
-            "horizontal_asymptote": float(horizontal_asymptote.evalf()) if horizontal_asymptote_exists else None,
-            "oblique_asymptote": oblique_asymptote if not horizontal_asymptote_exists else None,
+            "horizontal_asymptote": float(horizontal_asymptote.evalf()) if horizontal_asymptote else None,
+            "oblique_asymptote": oblique_asymptote,
             "x_intercepts": x_intercepts,
-            "y_intercept": y_intercept_val,
+            "y_intercept": y_intercept,
             "holes": hole_points
         }
+
+    except PolynomialError:
+        raise ValueError("The function is not a rational function (it must be a ratio of polynomials).")
     except SympifyError:
         raise ValueError("Invalid mathematical expression. Please check your syntax and ensure all parentheses are balanced.")
     except Exception as e:
@@ -2387,76 +2375,85 @@ def show_midpoint_distance():
 
 # Function to compute the Circle Equation and Radius using points
 def Circle_Equation_from_points(center_x, center_y, point_x, point_y):
-    # Convert the input points to Fraction to ensure rational results
-    center_x, center_y = Fraction(center_x), Fraction(center_y)
-    point_x, point_y = Fraction(point_x), Fraction(point_y)
+    """Computes the circle equation from the center and a point on the circumference."""
+    try:
+        # Convert inputs to floats
+        center_x, center_y, point_x, point_y = map(float, [center_x, center_y, point_x, point_y])
 
-    # Calculate the radius (distance between center and point on circumference)
-    radius = sympy.sqrt((point_x - center_x) ** 2 + (point_y - center_y) ** 2)
+        # Calculate radius
+        radius = sqrt((point_x - center_x) ** 2 + (point_y - center_y) ** 2)
 
-    # The equation of the circle in standard form: (x - h)^2 + (y - k)^2 = r^2
-    h, k = center_x, center_y
-    r_squared = radius ** 2
+        # Standard form of circle: (x - h)^2 + (y - k)^2 = r^2
+        h, k = center_x, center_y
+        r_squared = radius ** 2
 
-    # Standard form
-    standard_form = f"(x - {h})^2 + (y - {k})^2 = {r_squared}"
+        standard_form = f"(x - {h})^2 + (y - {k})^2 = {r_squared}"
 
-    # General form: x^2 + y^2 + Dx + Ey + F = 0
-    D = -2 * h
-    E = -2 * k
-    F = h**2 + k**2 - r_squared
-    general_form = f"x^2 + y^2 + ({D})x + ({E})y + ({F}) = 0"
+        # General form: x^2 + y^2 + Dx + Ey + F = 0
+        D = -2 * h
+        E = -2 * k
+        F = h ** 2 + k ** 2 - r_squared
+        general_form = f"x^2 + y^2 + ({D})x + ({E})y + ({F}) = 0"
 
-    return radius, standard_form, general_form
+        return radius, standard_form, general_form
+
+    except ValueError:
+        raise ValueError("Please enter valid numeric values for the points.")
 
 # Function to compute the center and radius from the given equation
 def Circle_Equation_from_equation(equation):
-    # Parse the equation to extract center and radius
-    match = re.match(r"\(x - ([\d.-]+)\)\^2 \+ \(y - ([\d.-]+)\)\^2 = ([\d.-]+)", equation)
-    if match:
-        h = float(match.group(1))
-        k = float(match.group(2))
-        r_squared = float(match.group(3))
-        radius = sympy.sqrt(r_squared)
+    """Computes the center and radius of the circle from the equation."""
+    try:
+        # Check and parse the equation string using regex
+        match = re.match(r"\(x - ([\d.-]+)\)\^2 \+ \(y - ([\d.-]+)\)\^2 = ([\d.-]+)", equation)
+        if match:
+            h = float(match.group(1))
+            k = float(match.group(2))
+            r_squared = float(match.group(3))
+            radius = sqrt(r_squared)
 
-        center = (h, k)
-        return center, radius
-    else:
-        raise ValueError("Invalid circle equation format. Please use the standard form: (x - h)^2 + (y - k)^2 = r^2.")
+            center = (h, k)
+            return center, radius
+        else:
+            raise ValueError("Invalid circle equation format. Please use the form: (x - h)^2 + (y - k)^2 = r^2.")
+
+    except ValueError as e:
+        raise ValueError(str(e))
 
 # GUI Logic to Display Circle Equation and Radius when points are given
 def show_circle_equation_from_points():
+    """Handles GUI input for calculating the circle equation from points."""
     try:
-        # Fetch the user input and convert it to floats first
-        center_x = float(circle_center_x_entry.get())
-        center_y = float(circle_center_y_entry.get())
-        point_x = float(circle_point_x_entry.get())
-        point_y = float(circle_point_y_entry.get())
+        # Fetch user input for center and point on circumference
+        center_x = circle_center_x_entry.get()
+        center_y = circle_center_y_entry.get()
+        point_x = circle_point_x_entry.get()
+        point_y = circle_point_y_entry.get()
 
-        # Call Circle_Equation function
+        if not (center_x and center_y and point_x and point_y):
+            raise ValueError("Please enter values for both the center and a point on the circumference.")
+
+        # Calculate and display the circle equation
         radius, standard_form, general_form = Circle_Equation_from_points(center_x, center_y, point_x, point_y)
+        messagebox.showinfo("Circle Equation", f"Radius: {radius}\nStandard Form: {standard_form}\nGeneral Form: {general_form}")
 
-        # Display the result in a message box
-        messagebox.showinfo("Circle Equation",
-                            f"Radius: {radius}\n"
-                            f"Standard Form: {standard_form}\n"
-                            f"General Form: {general_form}")
-    except ValueError:
-        messagebox.showerror("Invalid Input", "Please enter valid numeric values.")
+    except ValueError as e:
+        messagebox.showerror("Invalid Input", str(e))
 
 # GUI Logic to Display Center and Radius when equation is given
 def show_circle_equation_from_equation():
+    """Handles GUI input for extracting center and radius from the given circle equation."""
     try:
-        # Fetch the equation input
+        # Fetch equation input
         equation = circle_equation_entry.get()
 
-        # Call Circle_Equation_from_equation function
-        center, radius = Circle_Equation_from_equation(equation)
+        if not equation:
+            raise ValueError("Please enter the circle equation.")
 
-        # Display the result in a message box
-        messagebox.showinfo("Circle Information",
-                            f"Center: {center}\n"
-                            f"Radius: {radius}")
+        # Calculate and display center and radius
+        center, radius = Circle_Equation_from_equation(equation)
+        messagebox.showinfo("Circle Information", f"Center: {center}\nRadius: {radius}")
+
     except ValueError as e:
         messagebox.showerror("Invalid Input", str(e))
 
@@ -4096,15 +4093,15 @@ def on_submit():
             messagebox.showerror("Error", f"An error occurred:\n{str(e)}")
     elif problem_type == "Midpoint and Distance":
         show_midpoint_distance()  # Call midpoint and distance function
-    #elif problem_type == "Circle Equation":
-        #input_type = circle_input_type_var.get()
+    elif problem_type == "Circle Equation":
+        input_type = circle_input_type_var.get()
 
-        #if input_type == "Points":
-            #show_circle_equation_from_points()  # Call function for points input
-        #elif input_type == "Equation":
-            #show_circle_equation_from_equation()  # Call function for equation input
-        #else:
-            #messagebox.showerror("Error", "Invalid input type selected.")
+        if input_type == "Points":
+            show_circle_equation_from_points()  # Call function for points input
+        elif input_type == "Equation":
+            show_circle_equation_from_equation()  # Call function for equation input
+        else:
+            messagebox.showerror("Error", "Invalid input type selected.")
     elif problem_type == "Two Trig Functions":
         try:
             trig_func1_name = two_trig_func1_var.get()
@@ -4282,9 +4279,9 @@ def switch_input_type(*args):
     points_frame.pack_forget()
     parallel_perpendicular_frame.pack_forget()
     polynomial_frame.pack_forget()  # Hide the polynomial frame initially
-    #circle_frame.pack_forget()
-    #circle_points_frame.pack_forget()
-    #circle_equation_frame.pack_forget()
+    circle_points_frame.pack_forget()
+    circle_equation_frame.pack_forget()
+
 
     # Show the relevant frame based on the selected input type
     choice = var.get()
@@ -4296,12 +4293,12 @@ def switch_input_type(*args):
         parallel_perpendicular_frame.pack(pady=10)
     elif choice == "Polynomials":
         polynomial_frame.pack(pady=10)
-    #elif choice == "Circle":
-        #choice = circle_input_type_var.get()
-        #if choice == "Points":
-            #circle_points_frame.pack(pady=10)
-        #elif choice == "Equation":
-            #circle_equation_frame.pack(pady=10)
+    elif choice == "Circle":
+        selected_type = circle_input_type_var.get()
+        if selected_type == "Points":
+            circle_points_frame.pack(pady=10)
+        elif selected_type == "Equation":
+            circle_equation_frame.pack(pady=10)
     else:
         pass
 
@@ -4339,7 +4336,10 @@ def switch_problem_type(*args):
     solve_inequalities_frame.pack_forget()
     rational_frame.pack_forget()
     midpoint_frame.pack_forget()
-    #circle_frame.pack_forget()
+    circle_points_frame.pack_forget()
+    circle_equation_frame.pack_forget()
+    circle_input_type_menu.pack_forget()
+    input_type_menu.pack_forget()
     two_trig_frame.pack_forget()
     solve_trig_frame.pack_forget()
     double_half_angle_frame.pack_forget()
@@ -4410,9 +4410,10 @@ def switch_problem_type(*args):
         rational_frame.pack(pady=10)
     elif problem_type == "Midpoint and Distance":
         midpoint_frame.pack(pady=10)
-    #elif problem_type == "Circle Equation":
-        #circle_frame.pack(pady=10)
-        #pass
+    elif problem_type == "Circle Equation":
+        circle_input_type_menu.pack(pady=10)
+        switch_input_type()
+
     elif problem_type == "Two Trig Functions":
         two_trig_frame.pack(pady=10)
     elif problem_type == "Solve Trig Functions":
@@ -4552,7 +4553,7 @@ problem_type_menu = tk.OptionMenu(window, problem_var,
                                   "Solve Inequalities",
                                   "Rational Functions",
                                   "Midpoint and Distance",
-                                  #"Circle Equation",
+                                  "Circle Equation",
                                   "Two Trig Functions",
                                   "Solve Trig Functions",
                                   "Solve Double and Half Angle Equations",
@@ -4793,36 +4794,47 @@ two_trig_unit_menu.pack()
 
 
 # Define the variable for the input type of the circle (Points or Equation)
-#circle_input_type_var = tk.StringVar(window)
-#circle_input_type_var.set("Points")  # Default to Points input type
+circle_input_type_var = tk.StringVar(window)
+circle_input_type_var.set("Points")  # Default to Points input type
 
-# Set the dropdown to trigger this function
-#circle_input_type_menu = tk.OptionMenu(window, circle_input_type_var, "Points", "Equation", command=switch_input_type)
-#circle_input_type_menu.pack(pady=10)
+# Dropdown menu for selecting input type (Points or Equation)
+circle_input_type_menu = tk.OptionMenu(window, circle_input_type_var, "Points", "Equation", command=switch_input_type)
+circle_input_type_menu.pack(pady=10)
 
 # Frame for Points input (initially hidden)
-#circle_points_frame = tk.Frame(window)
-#tk.Label(circle_points_frame, text="Enter the center of the circle (center_x, center_y):").pack()
-#circle_center_x_entry = tk.Entry(circle_points_frame, width=10)
-#circle_center_y_entry = tk.Entry(circle_points_frame, width=10)
-#circle_center_x_entry.pack(side="left", padx=5)
-#circle_center_y_entry.pack(side="left", padx=5)
+circle_points_frame = tk.Frame(window)
+tk.Label(circle_points_frame, text="Enter the center of the circle:").pack(pady=5)
 
-#tk.Label(circle_points_frame, text="Enter a point on the circumference (point_x, point_y):").pack()
-#circle_point_x_entry = tk.Entry(circle_points_frame, width=10)
-#circle_point_y_entry = tk.Entry(circle_points_frame, width=10)
-#circle_point_x_entry.pack(side="left", padx=5)
-#circle_point_y_entry.pack(side="left", padx=5)
+# Center point entries
+center_x_label = tk.Label(circle_points_frame, text="Center X:")
+center_y_label = tk.Label(circle_points_frame, text="Center Y:")
+circle_center_x_entry = tk.Entry(circle_points_frame, width=10)
+circle_center_y_entry = tk.Entry(circle_points_frame, width=10)
+center_x_label.pack()
+circle_center_x_entry.pack(pady=2)
+center_y_label.pack()
+circle_center_y_entry.pack(pady=2)
+
+# Label and entries for circumference point
+tk.Label(circle_points_frame, text="Enter a point on the circumference:").pack(pady=5)
+circumference_x_label = tk.Label(circle_points_frame, text="Circumference X:")
+circumference_y_label = tk.Label(circle_points_frame, text="Circumference Y:")
+circle_point_x_entry = tk.Entry(circle_points_frame, width=10)
+circle_point_y_entry = tk.Entry(circle_points_frame, width=10)
+circumference_x_label.pack()
+circle_point_x_entry.pack(pady=2)
+circumference_y_label.pack()
+circle_point_y_entry.pack(pady=2)
 
 # Frame for Equation input (initially hidden)
-#circle_equation_frame = tk.Frame(window)
-#tk.Label(circle_equation_frame, text="Enter the circle equation in standard form (e.g., (x - 3)^2 + (y + 2)^2 = 25):").pack()
-#circle_equation_entry = tk.Entry(circle_equation_frame, width=50)
-#circle_equation_entry.pack(pady=10)
+circle_equation_frame = tk.Frame(window)
+tk.Label(circle_equation_frame, text="Enter the circle equation in standard form (e.g., (x - 3)^2 + (y + 2)^2 = 25):").pack()
+circle_equation_entry = tk.Entry(circle_equation_frame, width=50)
+circle_equation_entry.pack(pady=10)
 
 # Initially hide all circle-related frames
-#circle_points_frame.pack_forget()
-#circle_equation_frame.pack_forget()
+circle_points_frame.pack_forget()
+circle_equation_frame.pack_forget()
 
 # Frame for Midpoint and Distance input
 midpoint_frame = tk.Frame(window)
